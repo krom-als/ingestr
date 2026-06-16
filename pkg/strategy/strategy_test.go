@@ -80,14 +80,15 @@ type fakeDestination struct {
 
 	calls []string
 
-	prepareCalls []destination.PrepareOptions
-	writeCalls   []destination.WriteOptions
-	swapCalls    [][2]string
-	mergeCalls   []destination.MergeOptions
-	diCalls      []destination.DeleteInsertOptions
-	dropCalls    []string
-	execCalls    []execCall
-	waitCalls    []struct {
+	prepareCalls  []destination.PrepareOptions
+	writeCalls    []destination.WriteOptions
+	swapCalls     [][2]string
+	mergeCalls    []destination.MergeOptions
+	diCalls       []destination.DeleteInsertOptions
+	dropCalls     []string
+	truncateCalls []string
+	execCalls     []execCall
+	waitCalls     []struct {
 		Table        string
 		ExpectedRows int64
 	}
@@ -99,6 +100,7 @@ type fakeDestination struct {
 	deleteInsertErr   error
 	waitErr           error
 	dropErrByTable    map[string]error
+	truncateErr       error
 	noDeleteInsert    bool
 }
 
@@ -202,6 +204,15 @@ func (d *fakeDestination) DropTable(ctx context.Context, table string) error {
 	if d.dropErrByTable != nil {
 		err = d.dropErrByTable[table]
 	}
+	d.mu.Unlock()
+	return err
+}
+
+func (d *fakeDestination) TruncateTable(ctx context.Context, table string) error {
+	d.mu.Lock()
+	d.calls = append(d.calls, "TruncateTable")
+	d.truncateCalls = append(d.truncateCalls, table)
+	err := d.truncateErr
 	d.mu.Unlock()
 	return err
 }

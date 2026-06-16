@@ -39,10 +39,11 @@ type IngestConfig struct {
 	SourceTable string
 	DestTable   string
 
-	IncrementalStrategy IncrementalStrategy
-	IncrementalKey      string
-	IntervalStart       *time.Time
-	IntervalEnd         *time.Time
+	IncrementalStrategy         IncrementalStrategy
+	IncrementalStrategyExplicit bool
+	IncrementalKey              string
+	IntervalStart               *time.Time
+	IntervalEnd                 *time.Time
 
 	PrimaryKeys []string
 
@@ -117,6 +118,12 @@ func (c *IngestConfig) Validate() error {
 	if c.NoInference && strings.TrimSpace(c.Columns) == "" {
 		return &ValidationError{Field: "columns", Message: "is required when no-inference is enabled"}
 	}
+	if c.IsChangeTrackingSource() && c.SQLLimit > 0 {
+		return &ValidationError{Field: "sql-limit", Message: "is not supported for SQL Server Change Tracking sources because partial snapshots cannot safely advance the resume cursor"}
+	}
+	if c.IsChangeTrackingSource() && !c.FullRefresh && c.IncrementalStrategyExplicit && c.IncrementalStrategy != StrategyMerge {
+		return &ValidationError{Field: "incremental-strategy", Message: fmt.Sprintf("must be %q for SQL Server Change Tracking sources unless full-refresh is enabled", StrategyMerge)}
+	}
 	return nil
 }
 
@@ -127,6 +134,14 @@ func (c *IngestConfig) IsCDCSource() bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(c.SourceURI[:schemeEnd]), "+cdc")
+}
+
+func (c *IngestConfig) IsChangeTrackingSource() bool {
+	schemeEnd := strings.Index(c.SourceURI, "://")
+	if schemeEnd == -1 {
+		return false
+	}
+	return strings.Contains(strings.ToLower(c.SourceURI[:schemeEnd]), "+ct")
 }
 
 type ValidationError struct {
