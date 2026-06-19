@@ -15,6 +15,7 @@ import (
 	"github.com/bruin-data/ingestr/pkg/arrowconv"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 	"github.com/stripe/stripe-go/v81"
 	"github.com/stripe/stripe-go/v81/account"
 	"github.com/stripe/stripe-go/v81/applepaydomain"
@@ -126,7 +127,10 @@ func (s *StripeSource) HandlesIncrementality() bool {
 func (s *StripeSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
 	tableName := req.Name
 
-	normalizedName, mode := parseTableName(tableName)
+	normalizedName, mode, err := parseStripeSpec(tableName)
+	if err != nil {
+		return nil, err
+	}
 
 	// Strategy per loading mode, matching ingestr semantics:
 	//  - :sync:incremental  → merge (upsert date-window slices across runs)
@@ -211,6 +215,40 @@ func normalizeTableName(name string) string {
 	}
 
 	return name
+}
+
+// stripeParamKeys are the query parameters recognized by the URL-style form.
+var stripeParamKeys = []string{"mode", "incremental"}
+
+// parseStripeSpec parses a source-table string in either form:
+//
+//	charge?mode=sync&incremental=true   (URL-style; preferred)
+//	charge:sync:incremental              (legacy colon form)
+//
+// The query form is selected only when the table string carries a parameter
+// block (see tablespec.Split). Legacy parsing is delegated to parseTableName
+// unchanged.
+func parseStripeSpec(name string) (tableName string, mode loadingMode, err error) {
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return "", modeAsync, err
+	}
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, stripeParamKeys...); err != nil {
+			return "", modeAsync, err
+		}
+		tableName = normalizeTableName(strings.TrimSpace(path))
+		mode = modeAsync
+		if params.Get("mode") == "sync" {
+			mode = modeSync
+			if params.Get("incremental") == "true" {
+				mode = modeSyncIncremental
+			}
+		}
+		return tableName, mode, nil
+	}
+	tableName, mode = parseTableName(name)
+	return tableName, mode, nil
 }
 
 type tableConfig struct {
@@ -395,7 +433,10 @@ func (s *StripeSource) getOldestRecordTime(tableName string, accountCreated time
 }
 
 func (s *StripeSource) read(ctx context.Context, table string, opts source.ReadOptions) (<-chan source.RecordBatchResult, error) {
-	tableName, mode := parseTableName(table)
+	tableName, mode, err := parseStripeSpec(table)
+	if err != nil {
+		return nil, err
+	}
 
 	if _, ok := tables[tableName]; !ok {
 		supported := make([]string, 0, len(tables))

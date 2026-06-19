@@ -1,10 +1,12 @@
 package customerio
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/bruin-data/ingestr/pkg/source"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -376,4 +378,157 @@ func TestGetMaxSteps(t *testing.T) {
 	assert.Equal(t, 12, getMaxSteps("months", false))
 	assert.Equal(t, 121, getMaxSteps("months", true))
 	assert.Equal(t, 12, getMaxSteps("unknown", false))
+}
+
+func TestParseCustomerIOSpec(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantTable  string
+		wantPeriod string
+		wantErr    bool
+		errSubstr  string
+	}{
+		// Legacy colon form — must remain unchanged.
+		{name: "legacy plain table", input: "broadcasts", wantTable: "broadcasts", wantPeriod: ""},
+		{name: "legacy metrics with period", input: "campaign_metrics:days", wantTable: "campaign_metrics", wantPeriod: "days"},
+		{name: "legacy non-metrics with colon segment", input: "broadcasts:somevalue", wantTable: "broadcasts", wantPeriod: "somevalue"},
+
+		// Query form.
+		{name: "query plain table", input: "broadcasts?period=", wantTable: "broadcasts", wantPeriod: ""},
+		{name: "query metrics hours", input: "campaign_metrics?period=hours", wantTable: "campaign_metrics", wantPeriod: "hours"},
+		{name: "query metrics days", input: "broadcast_metrics?period=days", wantTable: "broadcast_metrics", wantPeriod: "days"},
+		{name: "query metrics weeks", input: "newsletter_metrics?period=weeks", wantTable: "newsletter_metrics", wantPeriod: "weeks"},
+		{name: "query metrics months", input: "campaign_metrics?period=months", wantTable: "campaign_metrics", wantPeriod: "months"},
+
+		// Unknown key rejected.
+		{name: "query unknown key", input: "campaign_metrics?period=days&foo=bar", wantErr: true, errSubstr: "unknown table parameter"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			table, period, err := parseCustomerIOSpec(tt.input)
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errSubstr != "" {
+					assert.Contains(t, err.Error(), tt.errSubstr)
+				}
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantTable, table)
+			assert.Equal(t, tt.wantPeriod, period)
+		})
+	}
+}
+
+// TestGetTable_TableStringParsing tests the inline <table>:<period> parsing in
+// GetTable. No HTTP client is needed because parse/validation runs before ReadFn.
+func TestGetTable_TableStringParsing(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		tableName string
+		wantErr   bool
+		errSubstr string
+	}{
+		{
+			name:      "non-metrics table without period",
+			tableName: "broadcasts",
+		},
+		{
+			name:      "non-metrics table with colon is split but period ignored",
+			tableName: "broadcasts:somevalue",
+		},
+		{
+			name:      "metrics table with valid period hours",
+			tableName: "broadcast_metrics:hours",
+		},
+		{
+			name:      "metrics table with valid period days",
+			tableName: "campaign_metrics:days",
+		},
+		{
+			name:      "metrics table with valid period weeks",
+			tableName: "newsletter_metrics:weeks",
+		},
+		{
+			name:      "metrics table with valid period months",
+			tableName: "broadcast_metrics:months",
+		},
+		{
+			name:      "metrics table missing period returns error",
+			tableName: "broadcast_metrics",
+			wantErr:   true,
+			errSubstr: "metrics tables require a period suffix",
+		},
+		{
+			name:      "metrics table with invalid period returns error",
+			tableName: "campaign_metrics:yearly",
+			wantErr:   true,
+			errSubstr: "invalid period",
+		},
+		{
+			name:      "unsupported table name returns error",
+			tableName: "no_such_table",
+			wantErr:   true,
+			errSubstr: "unsupported table",
+		},
+		{
+			name:      "unsupported table with colon still returns unsupported error",
+			tableName: "no_such_table:days",
+			wantErr:   true,
+			errSubstr: "unsupported table",
+		},
+
+		// Query form cases.
+		{
+			name:      "query form metrics with valid period days",
+			tableName: "campaign_metrics?period=days",
+		},
+		{
+			name:      "query form metrics with valid period hours",
+			tableName: "broadcast_metrics?period=hours",
+		},
+		{
+			name:      "query form metrics missing period returns error",
+			tableName: "broadcast_metrics?period=",
+			wantErr:   true,
+			errSubstr: "metrics tables require a period suffix",
+		},
+		{
+			name:      "query form metrics invalid period returns error",
+			tableName: "campaign_metrics?period=yearly",
+			wantErr:   true,
+			errSubstr: "invalid period",
+		},
+		{
+			name:      "query form non-metrics table no period",
+			tableName: "broadcasts?period=",
+		},
+		{
+			name:      "query form unknown key returns error",
+			tableName: "campaigns?foo=bar",
+			wantErr:   true,
+			errSubstr: "unknown table parameter",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			s := &CustomerIOSource{}
+			_, err := s.GetTable(context.Background(), source.TableRequest{Name: tt.tableName})
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errSubstr != "" {
+					assert.Contains(t, err.Error(), tt.errSubstr)
+				}
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }

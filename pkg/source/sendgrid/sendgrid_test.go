@@ -157,6 +157,42 @@ func TestParseTableName(t *testing.T) {
 	}
 }
 
+func TestParseTableNameQueryForm(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantTable string
+		wantAggr  string
+		wantErr   bool
+		errSubstr string
+	}{
+		{name: "global_stats no granularity defaults to day", input: "global_stats?granularity=", wantTable: "global_stats", wantAggr: "day"},
+		{name: "global_stats week", input: "global_stats?granularity=week", wantTable: "global_stats", wantAggr: "week"},
+		{name: "global_stats month", input: "global_stats?granularity=month", wantTable: "global_stats", wantAggr: "month"},
+		{name: "global_stats day explicit", input: "global_stats?granularity=day", wantTable: "global_stats", wantAggr: "day"},
+		{name: "plain table no params", input: "lists?granularity=", wantErr: true, errSubstr: "does not support a granularity suffix"},
+		{name: "plain table with granularity errors", input: "lists?granularity=week", wantErr: true, errSubstr: "does not support a granularity suffix"},
+		{name: "unknown table", input: "contacts?granularity=day", wantErr: true, errSubstr: "unsupported table"},
+		{name: "invalid granularity", input: "global_stats?granularity=hour", wantErr: true, errSubstr: "invalid granularity"},
+		{name: "unknown param key errors", input: "global_stats?interval=week", wantErr: true, errSubstr: "unknown table parameter"},
+		{name: "messages no params", input: "messages?granularity=", wantErr: true, errSubstr: "does not support a granularity suffix"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			table, aggr, err := parseTableName(tt.input)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errSubstr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantTable, table)
+			assert.Equal(t, tt.wantAggr, aggr)
+		})
+	}
+}
+
 func TestFilterByTimestamp(t *testing.T) {
 	items := []map[string]interface{}{
 		{"id": "1", "updated_at": "2024-01-01T00:00:00Z"},

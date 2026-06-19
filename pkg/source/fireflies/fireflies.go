@@ -15,6 +15,7 @@ import (
 	ingestrhttp "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -212,11 +213,9 @@ func (s *FirefliesSource) Close(ctx context.Context) error {
 }
 
 func (s *FirefliesSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
-	tableName := req.Name
-
-	// Handle analytics with granularity suffix (e.g., analytics:DAY)
-	if strings.HasPrefix(tableName, "analytics:") {
-		tableName = "analytics"
+	tableName, _, err := parseFirefliesSpec(req.Name)
+	if err != nil {
+		return nil, err
 	}
 
 	if !isValidTable(tableName) {
@@ -469,10 +468,9 @@ func (s *FirefliesSource) paginateAndSend(
 }
 
 func (s *FirefliesSource) read(ctx context.Context, table string, opts source.ReadOptions) (<-chan source.RecordBatchResult, error) {
-	// Handle analytics with granularity
-	tableName := table
-	if strings.HasPrefix(table, "analytics:") {
-		tableName = "analytics"
+	tableName, granularity, err := parseFirefliesSpec(table)
+	if err != nil {
+		return nil, err
 	}
 
 	results := make(chan source.RecordBatchResult, 8)
@@ -480,30 +478,30 @@ func (s *FirefliesSource) read(ctx context.Context, table string, opts source.Re
 	go func() {
 		defer close(results)
 
-		var err error
+		var readErr error
 		switch tableName {
 		case "transcripts":
-			err = s.readTranscripts(ctx, opts, results)
+			readErr = s.readTranscripts(ctx, opts, results)
 		case "users":
-			err = s.readUsers(ctx, opts, results)
+			readErr = s.readUsers(ctx, opts, results)
 		case "user_groups":
-			err = s.readUserGroups(ctx, opts, results)
+			readErr = s.readUserGroups(ctx, opts, results)
 		case "channels":
-			err = s.readChannels(ctx, opts, results)
+			readErr = s.readChannels(ctx, opts, results)
 		case "bites":
-			err = s.readBites(ctx, opts, results)
+			readErr = s.readBites(ctx, opts, results)
 		case "contacts":
-			err = s.readContacts(ctx, opts, results)
+			readErr = s.readContacts(ctx, opts, results)
 		case "active_meetings":
-			err = s.readActiveMeetings(ctx, opts, results)
+			readErr = s.readActiveMeetings(ctx, opts, results)
 		case "analytics":
-			err = s.readAnalytics(ctx, table, opts, results)
+			readErr = s.readAnalytics(ctx, granularity, opts, results)
 		default:
-			err = fmt.Errorf("unsupported table: %s", table)
+			readErr = fmt.Errorf("unsupported table: %s", table)
 		}
 
-		if err != nil {
-			results <- source.RecordBatchResult{Err: err}
+		if readErr != nil {
+			results <- source.RecordBatchResult{Err: readErr}
 		}
 	}()
 
@@ -517,6 +515,35 @@ func isValidTable(table string) bool {
 		}
 	}
 	return false
+}
+
+var firefliesParamKeys = []string{"granularity"}
+
+// parseFirefliesSpec parses a source-table string in either form:
+//
+//	analytics?granularity=DAY   (URL-style; preferred)
+//	analytics:DAY               (legacy colon form)
+//
+// Returns the base table name and the uppercased granularity (empty string means
+// use the default 30-day chunk). The granularity parameter is only meaningful for
+// the analytics table; other tables return an empty granularity.
+func parseFirefliesSpec(name string) (table, granularity string, err error) {
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return "", "", err
+	}
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, firefliesParamKeys...); err != nil {
+			return "", "", err
+		}
+		return strings.TrimSpace(path), strings.ToUpper(params.Get("granularity")), nil
+	}
+	// Legacy colon form, preserved exactly.
+	if strings.HasPrefix(name, "analytics:") {
+		parts := strings.SplitN(name, ":", 2)
+		return "analytics", strings.ToUpper(parts[1]), nil
+	}
+	return name, "", nil
 }
 
 type graphQLRequest struct {
@@ -1217,16 +1244,8 @@ func (s *FirefliesSource) transformActiveMeeting(node map[string]interface{}) ma
 	return result
 }
 
-func (s *FirefliesSource) readAnalytics(ctx context.Context, table string, opts source.ReadOptions, results chan<- source.RecordBatchResult) error {
+func (s *FirefliesSource) readAnalytics(ctx context.Context, granularity string, opts source.ReadOptions, results chan<- source.RecordBatchResult) error {
 	config.Debug("[FIREFLIES] Reading analytics with parallel fetching")
-
-	granularity := ""
-	if strings.Contains(table, ":") {
-		parts := strings.SplitN(table, ":", 2)
-		if len(parts) == 2 {
-			granularity = strings.ToUpper(parts[1])
-		}
-	}
 
 	dr := extractDateRange(opts)
 	startTime := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)

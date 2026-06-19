@@ -17,6 +17,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -211,7 +212,22 @@ func parsePostHogURI(uri string) (posthogCredentials, error) {
 	}, nil
 }
 
+var posthogParamKeys = []string{"variant"}
+
 func resolveTableConfig(tableName string) (tableConfig, error) {
+	path, params, hasQuery, err := tablespec.Split(tableName)
+	if err != nil {
+		return tableConfig{}, err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, posthogParamKeys...); err != nil {
+			return tableConfig{}, err
+		}
+		return resolveTableConfigFromParts(path, params.Get("variant"))
+	}
+
+	// Legacy colon form, preserved exactly.
 	if cfg, ok := baseTables[tableName]; ok {
 		return cfg, nil
 	}
@@ -223,6 +239,41 @@ func resolveTableConfig(tableName string) (tableConfig, error) {
 
 	if baseName != "property_definitions" {
 		return tableConfig{}, fmt.Errorf("unsupported table: %s (supported: %s)", tableName, supportedTableList())
+	}
+
+	propertyType, ok := propertyDefinitionTypes[variant]
+	if !ok {
+		return tableConfig{}, fmt.Errorf("unsupported property_definitions variant: %s (supported: %s)", variant, supportedPropertyDefinitionList())
+	}
+
+	return tableConfig{
+		endpoint:       "property_definitions",
+		primaryKeys:    []string{"id"},
+		incrementalKey: "updated_at",
+		strategy:       config.StrategyMerge,
+		intervalFields: []string{"updated_at"},
+		defaultQueryParams: map[string]string{
+			"type": propertyType,
+		},
+	}, nil
+}
+
+// resolveTableConfigFromParts resolves the table config from a base table name
+// and an optional variant (used by the query-param form).
+func resolveTableConfigFromParts(baseName, variant string) (tableConfig, error) {
+	if cfg, ok := baseTables[baseName]; ok {
+		if variant != "" {
+			return tableConfig{}, fmt.Errorf("%s table does not accept a variant parameter", baseName)
+		}
+		return cfg, nil
+	}
+
+	if baseName != "property_definitions" {
+		return tableConfig{}, fmt.Errorf("unsupported table: %s (supported: %s)", baseName, supportedTableList())
+	}
+
+	if variant == "" {
+		return tableConfig{}, fmt.Errorf("property_definitions requires a variant parameter (supported: %s)", supportedPropertyDefinitionList())
 	}
 
 	propertyType, ok := propertyDefinitionTypes[variant]

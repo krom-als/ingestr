@@ -317,3 +317,99 @@ func collectBatches(t *testing.T, ch <-chan source.RecordBatchResult) []source.R
 	}
 	return results
 }
+
+func TestResolveTableConfigQueryForm(t *testing.T) {
+	tests := []struct {
+		name        string
+		tableName   string
+		wantErr     bool
+		wantErrSub  string
+		wantEndpt   string
+		wantTypeVal string
+	}{
+		{
+			name:        "property_definitions with variant=event",
+			tableName:   "property_definitions?variant=event",
+			wantEndpt:   "property_definitions",
+			wantTypeVal: "event",
+		},
+		{
+			name:        "property_definitions with variant=person",
+			tableName:   "property_definitions?variant=person",
+			wantEndpt:   "property_definitions",
+			wantTypeVal: "person",
+		},
+		{
+			name:        "property_definitions with variant=session",
+			tableName:   "property_definitions?variant=session",
+			wantEndpt:   "property_definitions",
+			wantTypeVal: "session",
+		},
+		{
+			name:       "property_definitions without variant",
+			tableName:  "property_definitions?variant=",
+			wantErr:    true,
+			wantErrSub: "variant parameter",
+		},
+		{
+			name:       "property_definitions with unknown variant",
+			tableName:  "property_definitions?variant=group",
+			wantErr:    true,
+			wantErrSub: "unsupported property_definitions variant",
+		},
+		{
+			name:        "base table without variant param",
+			tableName:   "events?variant=",
+			wantErr:     false,
+			wantEndpt:   "events",
+			wantTypeVal: "",
+		},
+		{
+			name:       "base table rejects variant",
+			tableName:  "events?variant=event",
+			wantErr:    true,
+			wantErrSub: "does not accept a variant parameter",
+		},
+		{
+			name:       "unknown key rejected",
+			tableName:  "events?typo=bad",
+			wantErr:    true,
+			wantErrSub: "unknown table parameter",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := resolveTableConfig(tt.tableName)
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.wantErrSub != "" {
+					assert.Contains(t, err.Error(), tt.wantErrSub)
+				}
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantEndpt, cfg.endpoint)
+			if tt.wantTypeVal != "" {
+				assert.Equal(t, tt.wantTypeVal, cfg.defaultQueryParams["type"])
+			}
+		})
+	}
+}
+
+func TestResolveTableConfigQueryFormMatchesLegacy(t *testing.T) {
+	variants := []string{"event", "person", "session"}
+	for _, v := range variants {
+		legacy, err := resolveTableConfig("property_definitions:" + v)
+		require.NoError(t, err, "legacy form %q", v)
+
+		query, err := resolveTableConfig("property_definitions?variant=" + v)
+		require.NoError(t, err, "query form %q", v)
+
+		assert.Equal(t, legacy.endpoint, query.endpoint, "variant %q endpoint", v)
+		assert.Equal(t, legacy.primaryKeys, query.primaryKeys, "variant %q primaryKeys", v)
+		assert.Equal(t, legacy.incrementalKey, query.incrementalKey, "variant %q incrementalKey", v)
+		assert.Equal(t, legacy.strategy, query.strategy, "variant %q strategy", v)
+		assert.Equal(t, legacy.defaultQueryParams, query.defaultQueryParams, "variant %q defaultQueryParams", v)
+	}
+}

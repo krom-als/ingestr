@@ -14,6 +14,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -120,10 +121,13 @@ func (s *FundraiseUpSource) Close(ctx context.Context) error {
 }
 
 func (s *FundraiseUpSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
-	tableName := req.Name
+	tableName, err := parseFundraiseUpSpec(req.Name)
+	if err != nil {
+		return nil, err
+	}
 
 	if !isValidTable(tableName) {
-		return nil, fmt.Errorf("unsupported table: %s (supported: %s)", tableName, strings.Join(supportedTables, ", "))
+		return nil, fmt.Errorf("unsupported table: %s (supported: %s)", req.Name, strings.Join(supportedTables, ", "))
 	}
 
 	tc := tableConfigs[tableName]
@@ -150,6 +154,32 @@ func isValidTable(table string) bool {
 		}
 	}
 	return false
+}
+
+var fundraiseupParamKeys = []string{"incremental"}
+
+// parseFundraiseUpSpec resolves a source-table string to the canonical tableConfigs key.
+// It accepts either the legacy colon form ("donations" or "donations:incremental") or the
+// new URL-style query form ("donations?incremental=true"). Both forms produce the same key.
+func parseFundraiseUpSpec(name string) (string, error) {
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return "", err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, fundraiseupParamKeys...); err != nil {
+			return "", err
+		}
+		base := strings.TrimSpace(path)
+		incremental := strings.EqualFold(params.Get("incremental"), "true")
+		if incremental {
+			return base + ":incremental", nil
+		}
+		return base, nil
+	}
+
+	return name, nil
 }
 
 func (s *FundraiseUpSource) read(ctx context.Context, table string, opts source.ReadOptions) (<-chan source.RecordBatchResult, error) {

@@ -1,6 +1,7 @@
 package fireflies
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -491,4 +492,290 @@ func TestDateRange_WithValues(t *testing.T) {
 	require.NotNil(t, dr.end)
 	assert.Equal(t, 2024, dr.start.Year())
 	assert.Equal(t, time.December, dr.end.Month())
+}
+
+// ============================================================================
+// TestGetTable_TableStringParsing — analytics:<granularity> prefix handling
+// ============================================================================
+
+// ============================================================================
+// TestParseFirefliesSpec — dual-parse: URL-style query form + legacy colon form
+// ============================================================================
+
+func TestParseFirefliesSpec_QueryForm(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		input      string
+		wantTable  string
+		wantGran   string
+		wantErrSub string
+	}{
+		{
+			name:      "analytics with DAY granularity",
+			input:     "analytics?granularity=DAY",
+			wantTable: "analytics",
+			wantGran:  "DAY",
+		},
+		{
+			name:      "analytics with HOUR granularity",
+			input:     "analytics?granularity=HOUR",
+			wantTable: "analytics",
+			wantGran:  "HOUR",
+		},
+		{
+			name:      "analytics with MONTH granularity",
+			input:     "analytics?granularity=MONTH",
+			wantTable: "analytics",
+			wantGran:  "MONTH",
+		},
+		{
+			name:      "analytics with lowercase granularity is uppercased",
+			input:     "analytics?granularity=day",
+			wantTable: "analytics",
+			wantGran:  "DAY",
+		},
+		{
+			name:      "analytics without granularity parameter",
+			input:     "analytics?granularity=",
+			wantTable: "analytics",
+			wantGran:  "",
+		},
+		{
+			name:       "unknown parameter is rejected",
+			input:      "analytics?typo=DAY",
+			wantErrSub: "unknown table parameter",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			table, gran, err := parseFirefliesSpec(tt.input)
+			if tt.wantErrSub != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErrSub)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantTable, table)
+			assert.Equal(t, tt.wantGran, gran)
+		})
+	}
+}
+
+func TestParseFirefliesSpec_LegacyForm(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		input     string
+		wantTable string
+		wantGran  string
+	}{
+		{
+			name:      "bare analytics",
+			input:     "analytics",
+			wantTable: "analytics",
+			wantGran:  "",
+		},
+		{
+			name:      "analytics:DAY",
+			input:     "analytics:DAY",
+			wantTable: "analytics",
+			wantGran:  "DAY",
+		},
+		{
+			name:      "analytics:HOUR",
+			input:     "analytics:HOUR",
+			wantTable: "analytics",
+			wantGran:  "HOUR",
+		},
+		{
+			name:      "analytics:MONTH",
+			input:     "analytics:MONTH",
+			wantTable: "analytics",
+			wantGran:  "MONTH",
+		},
+		{
+			name:      "analytics:lowercase is uppercased",
+			input:     "analytics:day",
+			wantTable: "analytics",
+			wantGran:  "DAY",
+		},
+		{
+			name:      "transcripts has no granularity",
+			input:     "transcripts",
+			wantTable: "transcripts",
+			wantGran:  "",
+		},
+		{
+			name:      "users has no granularity",
+			input:     "users",
+			wantTable: "users",
+			wantGran:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			table, gran, err := parseFirefliesSpec(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantTable, table)
+			assert.Equal(t, tt.wantGran, gran)
+		})
+	}
+}
+
+func TestParseFirefliesSpec_QueryAndLegacyEquivalence(t *testing.T) {
+	pairs := []struct {
+		legacy string
+		query  string
+	}{
+		{"analytics:DAY", "analytics?granularity=DAY"},
+		{"analytics:HOUR", "analytics?granularity=HOUR"},
+		{"analytics:MONTH", "analytics?granularity=MONTH"},
+	}
+	for _, p := range pairs {
+		legTable, legGran, err := parseFirefliesSpec(p.legacy)
+		require.NoError(t, err)
+		qTable, qGran, err := parseFirefliesSpec(p.query)
+		require.NoError(t, err)
+		assert.Equal(t, legTable, qTable, "table mismatch for %s vs %s", p.legacy, p.query)
+		assert.Equal(t, legGran, qGran, "granularity mismatch for %s vs %s", p.legacy, p.query)
+	}
+}
+
+func TestGetTable_QueryFormAnalytics(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		tableName string
+		wantName  string
+		wantErr   bool
+		errSubstr string
+	}{
+		{
+			name:      "analytics?granularity=DAY resolves to analytics",
+			tableName: "analytics?granularity=DAY",
+			wantName:  "analytics",
+		},
+		{
+			name:      "analytics?granularity=HOUR resolves to analytics",
+			tableName: "analytics?granularity=HOUR",
+			wantName:  "analytics",
+		},
+		{
+			name:      "analytics?granularity=MONTH resolves to analytics",
+			tableName: "analytics?granularity=MONTH",
+			wantName:  "analytics",
+		},
+		{
+			name:      "unknown query parameter is rejected",
+			tableName: "analytics?badparam=DAY",
+			wantErr:   true,
+			errSubstr: "unknown table parameter",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			s := &FirefliesSource{}
+			table, err := s.GetTable(context.Background(), source.TableRequest{Name: tt.tableName})
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errSubstr != "" {
+					assert.Contains(t, err.Error(), tt.errSubstr)
+				}
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantName, table.Name())
+		})
+	}
+}
+
+func TestGetTable_TableStringParsing(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		tableName string
+		wantName  string
+		wantErr   bool
+		errSubstr string
+	}{
+		{
+			name:      "bare analytics resolves to analytics",
+			tableName: "analytics",
+			wantName:  "analytics",
+		},
+		{
+			name:      "analytics:DAY strips suffix and resolves to analytics",
+			tableName: "analytics:DAY",
+			wantName:  "analytics",
+		},
+		{
+			name:      "analytics:HOUR strips suffix and resolves to analytics",
+			tableName: "analytics:HOUR",
+			wantName:  "analytics",
+		},
+		{
+			name:      "analytics:MONTH strips suffix and resolves to analytics",
+			tableName: "analytics:MONTH",
+			wantName:  "analytics",
+		},
+		{
+			name:      "analytics:lowercase also strips suffix",
+			tableName: "analytics:day",
+			wantName:  "analytics",
+		},
+		{
+			name:      "transcripts is valid without suffix",
+			tableName: "transcripts",
+			wantName:  "transcripts",
+		},
+		{
+			name:      "users is valid",
+			tableName: "users",
+			wantName:  "users",
+		},
+		{
+			name:      "unsupported table returns error",
+			tableName: "no_such_table",
+			wantErr:   true,
+			errSubstr: "unsupported table",
+		},
+		{
+			name:      "unsupported table with colon returns error",
+			tableName: "no_such_table:DAY",
+			wantErr:   true,
+			errSubstr: "unsupported table",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			s := &FirefliesSource{}
+			table, err := s.GetTable(context.Background(), source.TableRequest{Name: tt.tableName})
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errSubstr != "" {
+					assert.Contains(t, err.Error(), tt.errSubstr)
+				}
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantName, table.Name())
+		})
+	}
 }

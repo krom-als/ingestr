@@ -18,6 +18,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -351,14 +352,12 @@ func (s *CustomerIOSource) Close(ctx context.Context) error {
 	return nil
 }
 
-func (s *CustomerIOSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
-	tableName := req.Name
-	period := ""
+var customerioParamKeys = []string{"period"}
 
-	if strings.Contains(tableName, ":") {
-		parts := strings.SplitN(tableName, ":", 2)
-		tableName = parts[0]
-		period = parts[1]
+func (s *CustomerIOSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
+	tableName, period, err := parseCustomerIOSpec(req.Name)
+	if err != nil {
+		return nil, err
 	}
 
 	cfg, ok := tables[tableName]
@@ -389,6 +388,32 @@ func (s *CustomerIOSource) GetTable(ctx context.Context, req source.TableRequest
 			return s.read(ctx, tableName, period, opts)
 		},
 	}, nil
+}
+
+// parseCustomerIOSpec parses a source-table string in either form:
+//
+//	campaign_metrics?period=days   (URL-style; preferred)
+//	campaign_metrics:days          (legacy colon form)
+//
+// Non-metrics tables accept a plain name with no period in either form.
+func parseCustomerIOSpec(name string) (table, period string, err error) {
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return "", "", err
+	}
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, customerioParamKeys...); err != nil {
+			return "", "", err
+		}
+		return strings.TrimSpace(path), params.Get("period"), nil
+	}
+
+	// Legacy colon form, preserved exactly.
+	if strings.Contains(name, ":") {
+		parts := strings.SplitN(name, ":", 2)
+		return parts[0], parts[1], nil
+	}
+	return name, "", nil
 }
 
 func parseURI(uri string) (string, string, error) {

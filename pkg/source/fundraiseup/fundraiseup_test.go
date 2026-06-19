@@ -10,6 +10,87 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestParseFundraiseUpSpec_Legacy(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"donations", "donations"},
+		{"donations:incremental", "donations:incremental"},
+		{"events", "events"},
+		{"events:incremental", "events:incremental"},
+		{"fundraisers", "fundraisers"},
+		{"fundraisers:incremental", "fundraisers:incremental"},
+		{"recurring_plans", "recurring_plans"},
+		{"recurring_plans:incremental", "recurring_plans:incremental"},
+		{"supporters", "supporters"},
+		{"supporters:incremental", "supporters:incremental"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			got, err := parseFundraiseUpSpec(tc.input)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestParseFundraiseUpSpec_QueryForm(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"donations?incremental=true", "donations:incremental"},
+		{"donations?incremental=false", "donations"},
+		{"events?incremental=true", "events:incremental"},
+		{"fundraisers?incremental=true", "fundraisers:incremental"},
+		{"recurring_plans?incremental=true", "recurring_plans:incremental"},
+		{"supporters?incremental=true", "supporters:incremental"},
+		{"donations?incremental=True", "donations:incremental"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			got, err := parseFundraiseUpSpec(tc.input)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestParseFundraiseUpSpec_QueryFormErrors(t *testing.T) {
+	cases := []struct {
+		input   string
+		errFrag string
+	}{
+		{"donations?unknown=true", "unknown table parameter"},
+		{"donations?incremental=true&bogus=x", "unknown table parameter"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			_, err := parseFundraiseUpSpec(tc.input)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.errFrag)
+		})
+	}
+}
+
+func TestParseFundraiseUpSpec_QueryMatchesLegacy(t *testing.T) {
+	bases := []string{"donations", "events", "fundraisers", "recurring_plans", "supporters"}
+	for _, base := range bases {
+		t.Run(base, func(t *testing.T) {
+			legacyKey, err := parseFundraiseUpSpec(base + ":incremental")
+			require.NoError(t, err)
+			queryKey, err := parseFundraiseUpSpec(base + "?incremental=true")
+			require.NoError(t, err)
+			assert.Equal(t, legacyKey, queryKey, "query form must resolve to the same key as legacy form")
+
+			legacyCfg := tableConfigs[legacyKey]
+			queryCfg := tableConfigs[queryKey]
+			assert.Equal(t, legacyCfg, queryCfg)
+		})
+	}
+}
+
 func TestParseURI_Valid(t *testing.T) {
 	key, err := parseURI("fundraiseup://?api_key=test123")
 	require.NoError(t, err)

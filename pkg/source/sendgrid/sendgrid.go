@@ -17,6 +17,7 @@ import (
 	ingestrhttp "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -310,9 +311,43 @@ func parseURI(uri string) (credentials, error) {
 	}, nil
 }
 
-// parseTableName splits an optional granularity suffix (e.g. "global_stats:week") from the table
-// name. Only global_stats accepts one (sets aggregated_by, default "day"); aggregatedBy is "" otherwise.
+var sendgridParamKeys = []string{"granularity"}
+
+// parseTableName splits an optional granularity suffix from the table name.
+// Accepts either the URL-style query form (global_stats?granularity=week) or the
+// legacy colon form (global_stats:week). Only global_stats accepts a granularity;
+// aggregatedBy is "" for all other tables.
 func parseTableName(name string) (table string, aggregatedBy string, err error) {
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return "", "", err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, sendgridParamKeys...); err != nil {
+			return "", "", err
+		}
+		table = strings.TrimSpace(path)
+		if !isValidTable(table) {
+			return "", "", fmt.Errorf("unsupported table: %s (supported: %s)", name, supportedTableList())
+		}
+		if table != "global_stats" {
+			if params.Has("granularity") {
+				return "", "", fmt.Errorf("table %q does not support a granularity suffix", table)
+			}
+			return table, "", nil
+		}
+		g := params.Get("granularity")
+		if g == "" {
+			return table, defaultStatsAggregated, nil
+		}
+		if !validAggregations[g] {
+			return "", "", fmt.Errorf("invalid granularity %q for global_stats: supported values are day, week, month", g)
+		}
+		return table, g, nil
+	}
+
+	// Legacy colon form, preserved exactly.
 	table = name
 	suffix := ""
 	if strings.Contains(name, ":") {

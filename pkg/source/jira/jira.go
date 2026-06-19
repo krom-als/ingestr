@@ -16,6 +16,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -111,8 +112,44 @@ func parseTableName(table string) (name string, skipArchived bool) {
 	return name, skipArchived
 }
 
+var jiraParamKeys = []string{"skip_archived"}
+
+// parseJiraSpec parses a source-table string in either form:
+//
+//	projects?skip_archived=true   (URL-style; preferred)
+//	projects:skip_archived        (legacy colon form)
+//
+// The skip_archived flag is only valid for projects, project_versions, and
+// project_components; that validation happens in GetTable.
+func parseJiraSpec(table string) (name string, skipArchived bool, err error) {
+	path, params, hasQuery, err := tablespec.Split(table)
+	if err != nil {
+		return "", false, err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, jiraParamKeys...); err != nil {
+			return "", false, err
+		}
+		if params.Has("skip_archived") {
+			val := params.Get("skip_archived")
+			if val != "true" && val != "false" {
+				return "", false, fmt.Errorf("skip_archived must be true or false, got %q", val)
+			}
+			skipArchived = val == "true"
+		}
+		return strings.TrimSpace(path), skipArchived, nil
+	}
+
+	n, s := parseTableName(table)
+	return n, s, nil
+}
+
 func (s *JiraSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
-	tableName, skipArchived := parseTableName(req.Name)
+	tableName, skipArchived, err := parseJiraSpec(req.Name)
+	if err != nil {
+		return nil, err
+	}
 
 	if !isValidTable(tableName) {
 		return nil, fmt.Errorf("unsupported table: %s (supported: %s)", tableName, strings.Join(supportedTables, ", "))

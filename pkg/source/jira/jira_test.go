@@ -215,3 +215,46 @@ func TestJsonUseNumber(t *testing.T) {
 		})
 	}
 }
+
+func TestParseJiraSpec(t *testing.T) {
+	tests := []struct {
+		input           string
+		wantName        string
+		wantSkipArchive bool
+		wantErr         bool
+	}{
+		// Query form — supported tables
+		{"projects?skip_archived=true", "projects", true, false},
+		{"project_versions?skip_archived=true", "project_versions", true, false},
+		{"project_components?skip_archived=true", "project_components", true, false},
+		// Query form — skip_archived=false explicit
+		{"projects?skip_archived=false", "projects", false, false},
+		// Query form — no skip_archived param
+		{"issues", "issues", false, false},
+		// Query form — unknown param rejected
+		{"projects?bad_param=true", "", false, true},
+		// Query form — invalid value for skip_archived
+		{"projects?skip_archived=yes", "", false, true},
+		// Legacy form still handled by parseJiraSpec via parseTableName fallback
+		{"projects:skip_archived", "projects", true, false},
+		{"issues", "issues", false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			name, skipArchived, err := parseJiraSpec(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseJiraSpec(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				if name != tt.wantName {
+					t.Errorf("parseJiraSpec(%q) name = %q, want %q", tt.input, name, tt.wantName)
+				}
+				if skipArchived != tt.wantSkipArchive {
+					t.Errorf("parseJiraSpec(%q) skipArchived = %v, want %v", tt.input, skipArchived, tt.wantSkipArchive)
+				}
+			}
+		})
+	}
+}
