@@ -13,6 +13,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const apiBaseURL = "https://hq1.appsflyer.com"
@@ -173,28 +174,41 @@ var supportedTables = map[string]tableMeta{
 	},
 }
 
+var appsflyerParamKeys = []string{"dimensions", "metrics"}
+
+func splitCommaSep(vals []string) []string {
+	var out []string
+	for _, v := range vals {
+		for _, part := range strings.Split(v, ",") {
+			if t := strings.TrimSpace(part); t != "" {
+				out = append(out, t)
+			}
+		}
+	}
+	return out
+}
+
 func (s *AppsflyerSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
-	tableName := req.Name
+	path, params, hasQuery, err := tablespec.Split(req.Name)
+	if err != nil {
+		return nil, err
+	}
 
+	var tableName string
 	var meta tableMeta
-	if strings.HasPrefix(tableName, "custom:") {
-		fields := strings.SplitN(tableName, ":", 3)
-		if len(fields) != 3 {
-			return nil, fmt.Errorf("invalid custom table format, expected custom:<dimensions>:<metrics>")
-		}
 
-		dimensions := strings.Split(fields[1], ",")
-		metrics := strings.Split(fields[2], ",")
-		for i := range dimensions {
-			dimensions[i] = strings.TrimSpace(dimensions[i])
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, appsflyerParamKeys...); err != nil {
+			return nil, err
 		}
-		for i := range metrics {
-			metrics[i] = strings.TrimSpace(metrics[i])
+		if path != "custom" {
+			return nil, fmt.Errorf("query parameters are only supported for the custom table, got %q", path)
 		}
+		dimensions := splitCommaSep(params["dimensions"])
+		metrics := splitCommaSep(params["metrics"])
 		if !slices.Contains(dimensions, "install_time") {
 			dimensions = append(dimensions, "install_time")
 		}
-
 		tableName = "custom"
 		meta = tableMeta{
 			dimensions:     dimensions,
@@ -203,15 +217,43 @@ func (s *AppsflyerSource) GetTable(ctx context.Context, req source.TableRequest)
 			incrementalKey: "install_time",
 		}
 	} else {
-		m, ok := supportedTables[tableName]
-		if !ok {
-			tables := make([]string, 0, len(supportedTables))
-			for t := range supportedTables {
-				tables = append(tables, t)
+		tableName = req.Name
+		if strings.HasPrefix(tableName, "custom:") {
+			fields := strings.SplitN(tableName, ":", 3)
+			if len(fields) != 3 {
+				return nil, fmt.Errorf("invalid custom table format, expected custom:<dimensions>:<metrics>")
 			}
-			return nil, fmt.Errorf("unsupported table: %s (supported: %v, or custom:<dimensions>:<metrics>)", req.Name, tables)
+
+			dimensions := strings.Split(fields[1], ",")
+			metrics := strings.Split(fields[2], ",")
+			for i := range dimensions {
+				dimensions[i] = strings.TrimSpace(dimensions[i])
+			}
+			for i := range metrics {
+				metrics[i] = strings.TrimSpace(metrics[i])
+			}
+			if !slices.Contains(dimensions, "install_time") {
+				dimensions = append(dimensions, "install_time")
+			}
+
+			tableName = "custom"
+			meta = tableMeta{
+				dimensions:     dimensions,
+				metrics:        metrics,
+				primaryKeys:    buildPrimaryKeys(dimensions),
+				incrementalKey: "install_time",
+			}
+		} else {
+			m, ok := supportedTables[tableName]
+			if !ok {
+				tables := make([]string, 0, len(supportedTables))
+				for t := range supportedTables {
+					tables = append(tables, t)
+				}
+				return nil, fmt.Errorf("unsupported table: %s (supported: %v, or custom:<dimensions>:<metrics>)", req.Name, tables)
+			}
+			meta = m
 		}
-		meta = m
 	}
 
 	schemaCols := buildSchemaColumns(meta.dimensions, meta.metrics)

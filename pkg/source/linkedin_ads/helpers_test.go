@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFlattenAnalyticsItems(t *testing.T) {
@@ -294,6 +295,167 @@ func TestParseCustomTable(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "dimensions must include one of")
 	})
+}
+
+func TestParseCustomTableQueryForm(t *testing.T) {
+	t.Run("query form: campaign+date dimensions", func(t *testing.T) {
+		cfg, err := parseCustomTableName("custom?dimensions=campaign,date&metrics=impressions,clicks,costInLocalCurrency")
+
+		assert.NoError(t, err)
+		assert.NotNil(t, cfg)
+		assert.Equal(t, []string{"campaign", "date"}, cfg.dimensions)
+		assert.Contains(t, cfg.metrics, "impressions")
+		assert.Contains(t, cfg.metrics, "clicks")
+		assert.Contains(t, cfg.metrics, "costInLocalCurrency")
+		assert.Contains(t, cfg.metrics, "pivotValues")
+		assert.Contains(t, cfg.metrics, "dateRange")
+		assert.Equal(t, "campaign", cfg.pivot)
+		assert.Equal(t, timeGranularityDaily, cfg.timeGranularity)
+		assert.Equal(t, []string{"campaign", "date"}, cfg.primaryKeys)
+		assert.Equal(t, "date", cfg.incrementalKey)
+	})
+
+	t.Run("query form: creative+month produces same result as legacy", func(t *testing.T) {
+		legacy, err := parseCustomTableName("custom:creative,month:impressions")
+		assert.NoError(t, err)
+
+		query, err := parseCustomTableName("custom?dimensions=creative,month&metrics=impressions")
+		assert.NoError(t, err)
+
+		assert.Equal(t, legacy.dimensions, query.dimensions)
+		assert.Equal(t, legacy.metrics, query.metrics)
+		assert.Equal(t, legacy.pivot, query.pivot)
+		assert.Equal(t, legacy.timeGranularity, query.timeGranularity)
+		assert.Equal(t, legacy.primaryKeys, query.primaryKeys)
+		assert.Equal(t, legacy.incrementalKey, query.incrementalKey)
+	})
+
+	t.Run("query form: repeated dimension keys", func(t *testing.T) {
+		cfg, err := parseCustomTableName("custom?dimensions=campaign&dimensions=date&metrics=impressions")
+
+		assert.NoError(t, err)
+		assert.NotNil(t, cfg)
+		assert.Equal(t, []string{"campaign", "date"}, cfg.dimensions)
+		assert.Equal(t, "campaign", cfg.pivot)
+		assert.Equal(t, timeGranularityDaily, cfg.timeGranularity)
+	})
+
+	t.Run("query form: repeated metrics keys", func(t *testing.T) {
+		cfg, err := parseCustomTableName("custom?dimensions=account,date&metrics=impressions&metrics=clicks")
+
+		assert.NoError(t, err)
+		assert.NotNil(t, cfg)
+		assert.Contains(t, cfg.metrics, "impressions")
+		assert.Contains(t, cfg.metrics, "clicks")
+	})
+
+	t.Run("query form: missing pivot dimension", func(t *testing.T) {
+		_, err := parseCustomTableName("custom?dimensions=date&metrics=impressions")
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "dimensions must include one of")
+	})
+
+	t.Run("query form: missing time grain", func(t *testing.T) {
+		_, err := parseCustomTableName("custom?dimensions=campaign&metrics=impressions")
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "'date' or 'month' is required")
+	})
+
+	t.Run("query form: empty metrics", func(t *testing.T) {
+		_, err := parseCustomTableName("custom?dimensions=campaign,date&metrics=")
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "at least one metric is required")
+	})
+
+	t.Run("query form: unknown parameter rejected", func(t *testing.T) {
+		_, err := parseCustomTableName("custom?dimensions=campaign,date&metrics=impressions&pivot=campaign")
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown table parameter")
+	})
+
+	t.Run("query form: member_country pivot with date", func(t *testing.T) {
+		cfg, err := parseCustomTableName("custom?dimensions=member_country,date&metrics=impressions")
+
+		assert.NoError(t, err)
+		assert.Equal(t, "member_country", cfg.pivot)
+		assert.Equal(t, []string{"member_country", "date"}, cfg.primaryKeys)
+	})
+}
+
+func TestParseLinkedInAdsURI(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		uri            string
+		wantToken      string
+		wantAccountIDs []string
+		wantErr        bool
+	}{
+		{
+			name:           "valid URI access_token only",
+			uri:            "linkedinads://?access_token=mytoken",
+			wantToken:      "mytoken",
+			wantAccountIDs: nil,
+		},
+		{
+			name:           "valid URI with single account_id",
+			uri:            "linkedinads://?access_token=mytoken&account_ids=123456",
+			wantToken:      "mytoken",
+			wantAccountIDs: []string{"123456"},
+		},
+		{
+			name:           "valid URI with multiple account_ids",
+			uri:            "linkedinads://?access_token=mytoken&account_ids=123,456,789",
+			wantToken:      "mytoken",
+			wantAccountIDs: []string{"123", "456", "789"},
+		},
+		{
+			name:           "account_ids with spaces trimmed",
+			uri:            "linkedinads://?access_token=tok&account_ids=111%2C+222",
+			wantToken:      "tok",
+			wantAccountIDs: []string{"111", "222"},
+		},
+		{
+			name:    "wrong scheme",
+			uri:     "postgres://?access_token=tok",
+			wantErr: true,
+		},
+		{
+			name:    "missing access_token",
+			uri:     "linkedinads://?account_ids=123",
+			wantErr: true,
+		},
+		{
+			name:    "empty access_token",
+			uri:     "linkedinads://?access_token=",
+			wantErr: true,
+		},
+		{
+			name:    "bare URI no query",
+			uri:     "linkedinads://",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			gotToken, gotIDs, err := parseLinkedInAdsURI(tt.uri)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantToken, gotToken)
+			assert.Equal(t, tt.wantAccountIDs, gotIDs)
+		})
+	}
 }
 
 func TestParseTimeInterval(t *testing.T) {

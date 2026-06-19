@@ -17,6 +17,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -140,6 +141,8 @@ func (s *TiktokAdsSource) HandlesIncrementality() bool {
 	return true
 }
 
+var tiktokAdsParamKeys = []string{"dimensions", "metrics", "filters"}
+
 func (s *TiktokAdsSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
 	if req.IncrementalKey != "" {
 		return nil, fmt.Errorf("tiktok takes care of incrementality on its own, you should not provide incremental_key")
@@ -147,13 +150,34 @@ func (s *TiktokAdsSource) GetTable(ctx context.Context, req source.TableRequest)
 
 	tableName := req.Name
 
-	if !strings.HasPrefix(tableName, "custom:") {
-		return nil, fmt.Errorf("unsupported table: %s (expected format: custom:<dimensions>:<metrics> or custom:<dimensions>:<metrics>:<filters>)", tableName)
-	}
-
-	dimensions, metrics, filterName, filterValues, err := parseCustomTable(tableName)
+	path, params, hasQuery, err := tablespec.Split(tableName)
 	if err != nil {
 		return nil, err
+	}
+
+	var dimensions, metrics []string
+	var filterName string
+	var filterValues []int
+
+	if hasQuery {
+		if path != "custom" {
+			return nil, fmt.Errorf("unsupported table: %s (expected format: custom?dimensions=...&metrics=...)", tableName)
+		}
+		if err := tablespec.ValidateKeys(params, tiktokAdsParamKeys...); err != nil {
+			return nil, err
+		}
+		dimensions, metrics, filterName, filterValues, err = parseCustomTableQuery(params)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		if !strings.HasPrefix(tableName, "custom:") {
+			return nil, fmt.Errorf("unsupported table: %s (expected format: custom:<dimensions>:<metrics> or custom:<dimensions>:<metrics>:<filters>)", tableName)
+		}
+		dimensions, metrics, filterName, filterValues, err = parseCustomTable(tableName)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	primaryKeys := append([]string{"advertiser_id"}, dimensions...)
@@ -214,6 +238,52 @@ func parseCustomTable(table string) (dimensions, metrics []string, filterName st
 
 	if len(fields) == 4 {
 		filterName, filterValues, err = parseFilters(fields[3])
+		if err != nil {
+			return nil, nil, "", nil, err
+		}
+	}
+
+	return dimensions, metrics, filterName, filterValues, nil
+}
+
+func parseCustomTableQuery(params url.Values) (dimensions, metrics []string, filterName string, filterValues []int, err error) {
+	rawDims := strings.Join(params["dimensions"], ",")
+	if rawDims == "" {
+		return nil, nil, "", nil, fmt.Errorf("dimensions parameter is required")
+	}
+	dimensions = strings.Split(strings.ReplaceAll(rawDims, " ", ""), ",")
+
+	hasIDDimension := false
+	for _, d := range dimensions {
+		if d == "campaign_id" || d == "adgroup_id" || d == "ad_id" {
+			hasIDDimension = true
+			break
+		}
+	}
+	if !hasIDDimension {
+		return nil, nil, "", nil, fmt.Errorf("TikTok API requires at least one ID dimension: [campaign_id, adgroup_id, ad_id]")
+	}
+
+	filtered := dimensions[:0]
+	for _, d := range dimensions {
+		if d != "advertiser_id" {
+			filtered = append(filtered, d)
+		}
+	}
+	dimensions = filtered
+
+	rawMetrics := strings.Join(params["metrics"], ",")
+	if rawMetrics == "" {
+		return nil, nil, "", nil, fmt.Errorf("metrics parameter is required")
+	}
+	metrics = strings.Split(strings.ReplaceAll(rawMetrics, " ", ""), ",")
+
+	filterSpecs := params["filters"]
+	if len(filterSpecs) > 1 {
+		return nil, nil, "", nil, fmt.Errorf("only one filter is allowed for TikTok custom reports")
+	}
+	if len(filterSpecs) == 1 {
+		filterName, filterValues, err = parseFilters(filterSpecs[0])
 		if err != nil {
 			return nil, nil, "", nil, err
 		}

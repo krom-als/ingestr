@@ -13,6 +13,7 @@ import (
 	ingestrhttp "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -71,6 +72,10 @@ func (s *AdjustSource) Close(ctx context.Context) error {
 	return nil
 }
 
+var adjustStandardParamKeys = []string{"app_tokens"}
+
+var adjustCustomParamKeys = []string{"dimensions", "metrics", "filters"}
+
 func parseTableAppToken(table string) (baseName string, appTokens string) {
 	if strings.HasPrefix(table, "custom:") {
 		return table, ""
@@ -83,9 +88,44 @@ func parseTableAppToken(table string) (baseName string, appTokens string) {
 	return baseName, appTokens
 }
 
-func (s *AdjustSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
-	tableName, appTokens := parseTableAppToken(req.Name)
+func splitTokens(v string) []string {
+	var out []string
+	for _, t := range strings.Split(v, ",") {
+		if s := strings.TrimSpace(t); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
 
+func (s *AdjustSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
+	path, params, hasQuery, err := tablespec.Split(req.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	if hasQuery && path == "custom" {
+		return s.getCustomTableFromQuery(ctx, params)
+	}
+
+	if hasQuery {
+		if validateErr := tablespec.ValidateKeys(params, adjustStandardParamKeys...); validateErr != nil {
+			return nil, validateErr
+		}
+		var tokens []string
+		for _, v := range params["app_tokens"] {
+			tokens = append(tokens, splitTokens(v)...)
+		}
+		appTokens := strings.Join(tokens, ",")
+		tableName := path
+		return s.buildStandardTable(tableName, appTokens)
+	}
+
+	tableName, appTokens := parseTableAppToken(req.Name)
+	return s.buildStandardTable(tableName, appTokens)
+}
+
+func (s *AdjustSource) buildStandardTable(tableName, appTokens string) (source.SourceTable, error) {
 	if !isValidTable(tableName) {
 		return nil, fmt.Errorf("unsupported table: %s (supported: %s)", tableName, strings.Join(supportedTables, ", "))
 	}
@@ -118,9 +158,9 @@ func (s *AdjustSource) GetTable(ctx context.Context, req source.TableRequest) (s
 		for _, d := range primaryKeys {
 			dimSet[d] = true
 		}
-		for _, req := range requiredCustomDimensions {
-			if dimSet[req] {
-				mergeKey = req
+		for _, r := range requiredCustomDimensions {
+			if dimSet[r] {
+				mergeKey = r
 				break
 			}
 		}
@@ -137,6 +177,43 @@ func (s *AdjustSource) GetTable(ctx context.Context, req source.TableRequest) (s
 		},
 		ReadFn: func(ctx context.Context, opts source.ReadOptions) (<-chan source.RecordBatchResult, error) {
 			return s.read(ctx, tableName, appTokens, opts)
+		},
+	}, nil
+}
+
+func (s *AdjustSource) getCustomTableFromQuery(ctx context.Context, params url.Values) (source.SourceTable, error) {
+	if validateErr := tablespec.ValidateKeys(params, adjustCustomParamKeys...); validateErr != nil {
+		return nil, validateErr
+	}
+	dims, metrics, filters, err := parseCustomTableQuery(params)
+	if err != nil {
+		return nil, err
+	}
+
+	primaryKeys := strings.Split(dims, ",")
+	dimSet := make(map[string]bool, len(primaryKeys))
+	for _, d := range primaryKeys {
+		dimSet[d] = true
+	}
+	var mergeKey string
+	for _, r := range requiredCustomDimensions {
+		if dimSet[r] {
+			mergeKey = r
+			break
+		}
+	}
+
+	return &source.DynamicSourceTable{
+		TableName:           "custom:" + dims + ":" + metrics,
+		TablePrimaryKeys:    primaryKeys,
+		TableIncrementalKey: mergeKey,
+		TableStrategy:       config.StrategyDeleteInsert,
+		KnownSchema:         false,
+		SchemaFn: func(ctx context.Context) (*schema.TableSchema, error) {
+			return nil, fmt.Errorf("adjust source does not have a predefined schema; schema inference is required")
+		},
+		ReadFn: func(ctx context.Context, opts source.ReadOptions) (<-chan source.RecordBatchResult, error) {
+			return s.readCustomDirect(ctx, dims, metrics, filters, "", opts)
 		},
 	}, nil
 }
@@ -438,6 +515,67 @@ func (s *AdjustSource) readCustom(ctx context.Context, table string, appTokens s
 	return nil
 }
 
+func (s *AdjustSource) readCustomDirect(ctx context.Context, dimensions, metrics string, filters map[string]string, appTokens string, opts source.ReadOptions) (<-chan source.RecordBatchResult, error) {
+	results := make(chan source.RecordBatchResult, 8)
+
+	go func() {
+		defer close(results)
+
+		datePeriod, err := s.buildDatePeriod(&opts)
+		if err != nil {
+			results <- source.RecordBatchResult{Err: fmt.Errorf("failed to build date period for custom report: %w", err)}
+			return
+		}
+
+		req := s.client.R(ctx).
+			SetQueryParam("dimensions", dimensions).
+			SetQueryParam("metrics", metrics).
+			SetQueryParam("date_period", datePeriod)
+
+		if appTokens != "" {
+			req.SetQueryParam("app_token__in", appTokens)
+		}
+		for k, v := range filters {
+			req.SetQueryParam(k, v)
+		}
+
+		resp, err := req.Get("report")
+		if err != nil {
+			results <- source.RecordBatchResult{Err: fmt.Errorf("failed to fetch custom report: %w", err)}
+			return
+		}
+		if !resp.IsSuccess() {
+			results <- source.RecordBatchResult{Err: fmt.Errorf("failed to fetch custom report: status %d: %s", resp.StatusCode(), resp.String())}
+			return
+		}
+
+		var result struct {
+			Rows []map[string]interface{} `json:"rows"`
+		}
+		if err := resp.JSON(&result); err != nil {
+			results <- source.RecordBatchResult{Err: fmt.Errorf("failed to parse custom report response: %w", err)}
+			return
+		}
+
+		if len(result.Rows) == 0 {
+			config.Debug("[ADJUST] No custom report data found")
+			return
+		}
+
+		cols := buildTypeHintColumns(dimensions, metrics)
+		record, err := arrowconv.ItemsToArrowRecordWithSchema(result.Rows, cols, opts.ExcludeColumns)
+		if err != nil {
+			results <- source.RecordBatchResult{Err: fmt.Errorf("failed to convert custom report to Arrow: %w", err)}
+			return
+		}
+
+		config.Debug("[ADJUST] Sending %d custom report rows", len(result.Rows))
+		results <- source.RecordBatchResult{Batch: record}
+	}()
+
+	return results, nil
+}
+
 var requiredCustomDimensions = []string{
 	"hour", "day", "week", "month", "quarter", "year",
 }
@@ -484,6 +622,44 @@ func buildTypeHintColumns(dimensions, metrics string) []schema.Column {
 		}
 	}
 	return cols
+}
+
+func parseCustomTableQuery(params url.Values) (dimensions, metrics string, filters map[string]string, err error) {
+	dimensions = strings.Join(splitTokens(strings.Join(params["dimensions"], ",")), ",")
+	metrics = strings.Join(splitTokens(strings.Join(params["metrics"], ",")), ",")
+
+	if dimensions == "" {
+		return "", "", nil, fmt.Errorf("dimensions cannot be empty in custom table")
+	}
+	if metrics == "" {
+		return "", "", nil, fmt.Errorf("metrics cannot be empty in custom table")
+	}
+
+	dims := strings.Split(dimensions, ",")
+	hasRequired := false
+	for _, d := range dims {
+		for _, req := range requiredCustomDimensions {
+			if d == req {
+				hasRequired = true
+				break
+			}
+		}
+		if hasRequired {
+			break
+		}
+	}
+	if !hasRequired {
+		return "", "", nil, fmt.Errorf("at least one of the required dimensions is missing for custom Adjust report: %v", requiredCustomDimensions)
+	}
+
+	filters = make(map[string]string)
+	for _, v := range params["filters"] {
+		for k, fv := range parseFilters(v) {
+			filters[k] = fv
+		}
+	}
+
+	return dimensions, metrics, filters, nil
 }
 
 func parseCustomTable(table string) (dimensions, metrics string, filters map[string]string, err error) {

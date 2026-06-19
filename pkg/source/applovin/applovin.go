@@ -15,6 +15,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -240,7 +241,22 @@ func (s *AppLovinSource) getTables() map[string]source.SourceTable {
 	}
 }
 
+var applovinParamKeys = []string{"endpoint", "report_type", "dimensions"}
+
 func (s *AppLovinSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
+	path, params, hasQuery, err := tablespec.Split(req.Name)
+	if err != nil {
+		return nil, err
+	}
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, applovinParamKeys...); err != nil {
+			return nil, err
+		}
+		if path == "custom" {
+			return s.createCustomReportTableFromParams(params)
+		}
+	}
+
 	// Handle custom reports: custom:{endpoint}:{report_type}:{dimensions}
 	if strings.HasPrefix(req.Name, "custom:") {
 		return s.createCustomReportTable(req.Name)
@@ -255,6 +271,54 @@ func (s *AppLovinSource) GetTable(ctx context.Context, req source.TableRequest) 
 		return nil, fmt.Errorf("unsupported table: %s (supported: %v, or custom:{endpoint}:{report_type}:{dimensions})", req.Name, tables)
 	}
 	return table, nil
+}
+
+func (s *AppLovinSource) createCustomReportTableFromParams(params url.Values) (source.SourceTable, error) {
+	endpoint := strings.TrimSpace(params.Get("endpoint"))
+	if endpoint == "" {
+		return nil, fmt.Errorf("custom report requires an endpoint parameter")
+	}
+
+	reportTypeStr := strings.TrimSpace(params.Get("report_type"))
+	var reportType ReportType
+	switch reportTypeStr {
+	case "publisher":
+		reportType = ReportTypePublisher
+	case "advertiser":
+		reportType = ReportTypeAdvertiser
+	default:
+		return nil, fmt.Errorf("invalid report_type: %s (must be 'publisher' or 'advertiser')", reportTypeStr)
+	}
+
+	var columns []string
+	for _, v := range params["dimensions"] {
+		for _, col := range strings.Split(v, ",") {
+			if t := strings.TrimSpace(col); t != "" {
+				columns = append(columns, t)
+			}
+		}
+	}
+	if len(columns) == 0 {
+		return nil, fmt.Errorf("custom report requires at least one dimension")
+	}
+
+	if !slices.Contains(columns, "day") {
+		columns = append(columns, "day")
+	}
+
+	return &source.DynamicSourceTable{
+		TableName:           "custom_report",
+		TablePrimaryKeys:    getDimensionColumns(columns),
+		TableIncrementalKey: "",
+		TableStrategy:       config.StrategyMerge,
+		KnownSchema:         false,
+		SchemaFn: func(ctx context.Context) (*schema.TableSchema, error) {
+			return nil, fmt.Errorf("applovin source does not have a predefined schema; schema inference is required")
+		},
+		ReadFn: func(ctx context.Context, opts source.ReadOptions) (<-chan source.RecordBatchResult, error) {
+			return s.readTable(ctx, endpoint, columns, reportType, opts)
+		},
+	}, nil
 }
 
 func (s *AppLovinSource) createCustomReportTable(spec string) (source.SourceTable, error) {

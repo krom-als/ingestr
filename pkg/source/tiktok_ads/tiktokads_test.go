@@ -1,8 +1,11 @@
 package tiktokads
 
 import (
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 func TestFindIntervals(t *testing.T) {
@@ -477,6 +480,113 @@ func TestParseURI(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseCustomTableQuery(t *testing.T) {
+	tests := []struct {
+		name          string
+		table         string
+		wantDims      []string
+		wantMetrics   []string
+		wantFilter    string
+		wantFilterVal []int
+		wantErr       bool
+	}{
+		{
+			name:        "basic query form",
+			table:       "custom?dimensions=campaign_id,stat_time_day&metrics=impressions,spend",
+			wantDims:    []string{"campaign_id", "stat_time_day"},
+			wantMetrics: []string{"impressions", "spend"},
+		},
+		{
+			name:          "query form with filter",
+			table:         "custom?dimensions=ad_id,stat_time_day&metrics=clicks,ctr&filters=campaign_id=111,222",
+			wantDims:      []string{"ad_id", "stat_time_day"},
+			wantMetrics:   []string{"clicks", "ctr"},
+			wantFilter:    "campaign_id",
+			wantFilterVal: []int{111, 222},
+		},
+		{
+			name:        "advertiser_id stripped from dimensions in query form",
+			table:       "custom?dimensions=advertiser_id,campaign_id,stat_time_day&metrics=spend",
+			wantDims:    []string{"campaign_id", "stat_time_day"},
+			wantMetrics: []string{"spend"},
+		},
+		{
+			name:    "missing ID dimension in query form",
+			table:   "custom?dimensions=stat_time_day&metrics=spend",
+			wantErr: true,
+		},
+		{
+			name:    "missing dimensions param",
+			table:   "custom?metrics=spend",
+			wantErr: true,
+		},
+		{
+			name:    "missing metrics param",
+			table:   "custom?dimensions=campaign_id",
+			wantErr: true,
+		},
+		{
+			name:    "unknown param key",
+			table:   "custom?dimensions=campaign_id&metrics=spend&unknown=foo",
+			wantErr: true,
+		},
+		{
+			name:    "wrong path in query form",
+			table:   "other?dimensions=campaign_id&metrics=spend",
+			wantErr: true,
+		},
+		{
+			name:    "repeated filters key returns error (multiple filters not allowed)",
+			table:   "custom?dimensions=campaign_id&metrics=spend&filters=campaign_id=111&filters=adgroup_id=222",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dims, metrics, filterName, filterVals, err := callQueryForm(tt.table)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !sliceEqual(dims, tt.wantDims) {
+				t.Errorf("dimensions = %v, want %v", dims, tt.wantDims)
+			}
+			if !sliceEqual(metrics, tt.wantMetrics) {
+				t.Errorf("metrics = %v, want %v", metrics, tt.wantMetrics)
+			}
+			if filterName != tt.wantFilter {
+				t.Errorf("filterName = %q, want %q", filterName, tt.wantFilter)
+			}
+			if !intSliceEqual(filterVals, tt.wantFilterVal) {
+				t.Errorf("filterValues = %v, want %v", filterVals, tt.wantFilterVal)
+			}
+		})
+	}
+}
+
+func callQueryForm(name string) (dimensions, metrics []string, filterName string, filterValues []int, err error) {
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return nil, nil, "", nil, err
+	}
+	if !hasQuery {
+		return nil, nil, "", nil, fmt.Errorf("no query block found in %q", name)
+	}
+	if path != "custom" {
+		return nil, nil, "", nil, fmt.Errorf("unsupported table: %s (expected format: custom?dimensions=...&metrics=...)", name)
+	}
+	if err := tablespec.ValidateKeys(params, tiktokAdsParamKeys...); err != nil {
+		return nil, nil, "", nil, err
+	}
+	return parseCustomTableQuery(params)
 }
 
 func sliceEqual(a, b []string) bool {

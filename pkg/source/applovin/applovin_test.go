@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bruin-data/ingestr/pkg/source"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -269,4 +270,177 @@ func TestCreateCustomReportTable(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCreateCustomReportTableDetails(t *testing.T) {
+	t.Parallel()
+
+	s := NewAppLovinSource()
+
+	t.Run("table name is always custom_report", func(t *testing.T) {
+		t.Parallel()
+		table, err := s.createCustomReportTable("custom:report:publisher:day,country")
+		require.NoError(t, err)
+		assert.Equal(t, "custom_report", table.Name())
+	})
+
+	t.Run("day auto-added when missing from dimensions", func(t *testing.T) {
+		t.Parallel()
+		// country is a dimension; clicks is a metric — getDimensionColumns filters to dimensions only.
+		// day is not in the spec but must be appended so it appears in TablePrimaryKeys.
+		table, err := s.createCustomReportTable("custom:report:publisher:country,clicks")
+		require.NoError(t, err)
+		pks := table.PrimaryKeys()
+		assert.Contains(t, pks, "day", "day should be auto-added to primary keys when absent")
+		assert.Contains(t, pks, "country")
+	})
+
+	t.Run("day not duplicated when already present", func(t *testing.T) {
+		t.Parallel()
+		table, err := s.createCustomReportTable("custom:report:publisher:day,country")
+		require.NoError(t, err)
+		pks := table.PrimaryKeys()
+		dayCount := 0
+		for _, pk := range pks {
+			if pk == "day" {
+				dayCount++
+			}
+		}
+		assert.Equal(t, 1, dayCount, "day should appear exactly once in primary keys")
+	})
+
+	t.Run("metric-only columns excluded from primary keys", func(t *testing.T) {
+		t.Parallel()
+		// clicks, impressions, revenue are metrics (not in the dimensions map).
+		table, err := s.createCustomReportTable("custom:report:publisher:day,country,clicks,impressions,revenue")
+		require.NoError(t, err)
+		pks := table.PrimaryKeys()
+		assert.NotContains(t, pks, "clicks")
+		assert.NotContains(t, pks, "impressions")
+		assert.NotContains(t, pks, "revenue")
+		assert.Contains(t, pks, "day")
+		assert.Contains(t, pks, "country")
+	})
+
+	t.Run("whitespace trimmed from dimensions", func(t *testing.T) {
+		t.Parallel()
+		table, err := s.createCustomReportTable("custom:report:publisher: day , country , clicks ")
+		require.NoError(t, err)
+		pks := table.PrimaryKeys()
+		assert.Contains(t, pks, "day")
+		assert.Contains(t, pks, "country")
+	})
+
+	t.Run("too few parts returns error", func(t *testing.T) {
+		t.Parallel()
+		_, err := s.createCustomReportTable("custom:report:publisher")
+		assert.Error(t, err)
+	})
+
+	t.Run("too many parts returns error", func(t *testing.T) {
+		t.Parallel()
+		_, err := s.createCustomReportTable("custom:report:publisher:day:extra")
+		assert.Error(t, err)
+	})
+
+	t.Run("publisher report type accepted", func(t *testing.T) {
+		t.Parallel()
+		_, err := s.createCustomReportTable("custom:report:publisher:day,country")
+		assert.NoError(t, err)
+	})
+
+	t.Run("advertiser report type accepted", func(t *testing.T) {
+		t.Parallel()
+		_, err := s.createCustomReportTable("custom:report:advertiser:day,campaign")
+		assert.NoError(t, err)
+	})
+
+	t.Run("unknown report type rejected", func(t *testing.T) {
+		t.Parallel()
+		_, err := s.createCustomReportTable("custom:report:unknown:day,country")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid report_type")
+	})
+}
+
+func TestCreateCustomReportTableFromParams(t *testing.T) {
+	t.Parallel()
+
+	s := NewAppLovinSource()
+
+	t.Run("query form basic", func(t *testing.T) {
+		t.Parallel()
+		table, err := s.GetTable(nil, source.TableRequest{Name: "custom?endpoint=report&report_type=publisher&dimensions=day,country"})
+		require.NoError(t, err)
+		assert.Equal(t, "custom_report", table.Name())
+	})
+
+	t.Run("query form advertiser", func(t *testing.T) {
+		t.Parallel()
+		table, err := s.GetTable(nil, source.TableRequest{Name: "custom?endpoint=probabilisticReport&report_type=advertiser&dimensions=day,campaign,impressions"})
+		require.NoError(t, err)
+		assert.Equal(t, "custom_report", table.Name())
+	})
+
+	t.Run("query form repeated dimensions key", func(t *testing.T) {
+		t.Parallel()
+		table, err := s.GetTable(nil, source.TableRequest{Name: "custom?endpoint=report&report_type=publisher&dimensions=day&dimensions=country"})
+		require.NoError(t, err)
+		pks := table.PrimaryKeys()
+		assert.Contains(t, pks, "day")
+		assert.Contains(t, pks, "country")
+	})
+
+	t.Run("query form day auto-added", func(t *testing.T) {
+		t.Parallel()
+		table, err := s.GetTable(nil, source.TableRequest{Name: "custom?endpoint=report&report_type=publisher&dimensions=country"})
+		require.NoError(t, err)
+		pks := table.PrimaryKeys()
+		assert.Contains(t, pks, "day")
+	})
+
+	t.Run("query form invalid report_type", func(t *testing.T) {
+		t.Parallel()
+		_, err := s.GetTable(nil, source.TableRequest{Name: "custom?endpoint=report&report_type=bad&dimensions=day,country"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid report_type")
+	})
+
+	t.Run("query form missing endpoint", func(t *testing.T) {
+		t.Parallel()
+		_, err := s.GetTable(nil, source.TableRequest{Name: "custom?report_type=publisher&dimensions=day,country"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "endpoint")
+	})
+
+	t.Run("query form missing dimensions", func(t *testing.T) {
+		t.Parallel()
+		_, err := s.GetTable(nil, source.TableRequest{Name: "custom?endpoint=report&report_type=publisher"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "dimension")
+	})
+
+	t.Run("query form unknown key rejected", func(t *testing.T) {
+		t.Parallel()
+		_, err := s.GetTable(nil, source.TableRequest{Name: "custom?endpoint=report&report_type=publisher&dimensions=day&typo=x"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown table parameter")
+	})
+
+	t.Run("legacy colon form still works via GetTable", func(t *testing.T) {
+		t.Parallel()
+		table, err := s.GetTable(nil, source.TableRequest{Name: "custom:report:publisher:day,country,clicks"})
+		require.NoError(t, err)
+		assert.Equal(t, "custom_report", table.Name())
+	})
+
+	t.Run("query form produces same primary keys as legacy form", func(t *testing.T) {
+		t.Parallel()
+		legacy, err := s.GetTable(nil, source.TableRequest{Name: "custom:report:publisher:day,country"})
+		require.NoError(t, err)
+		query, err := s.GetTable(nil, source.TableRequest{Name: "custom?endpoint=report&report_type=publisher&dimensions=day,country"})
+		require.NoError(t, err)
+		assert.Equal(t, legacy.PrimaryKeys(), query.PrimaryKeys())
+		assert.Equal(t, legacy.Name(), query.Name())
+	})
 }

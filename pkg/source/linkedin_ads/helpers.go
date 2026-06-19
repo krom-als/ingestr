@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bruin-data/ingestr/internal/config"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 func (s *LinkedInAdsSource) fetch(ctx context.Context, endpoint string, params map[string]string) (map[string]interface{}, error) {
@@ -203,15 +204,36 @@ type customAnalyticsConfig struct {
 	incrementalKey  string
 }
 
+var linkedinAdsParamKeys = []string{"dimensions", "metrics"}
+
 func parseCustomTableName(tableName string) (*customAnalyticsConfig, error) {
-	// Format: custom:<dimensions>:<metrics>
-	// Example: custom:campaign,date:impressions,clicks,costInLocalCurrency
+	path, params, hasQuery, err := tablespec.Split(tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, linkedinAdsParamKeys...); err != nil {
+			return nil, err
+		}
+		var dimensions []string
+		for _, v := range params["dimensions"] {
+			dimensions = append(dimensions, splitValues(v)...)
+		}
+		var metrics []string
+		for _, v := range params["metrics"] {
+			metrics = append(metrics, splitValues(v)...)
+		}
+		_ = path
+		return buildCustomAnalyticsConfig(dimensions, metrics)
+	}
+
+	// Legacy form: custom:<dimensions>:<metrics>
 	parts := strings.Split(tableName, ":")
 	if len(parts) != 3 {
 		return nil, fmt.Errorf("invalid custom table format. Expected: custom:<dimensions>:<metrics>")
 	}
 
-	// Parse dimensions
 	dimStr := strings.TrimSpace(parts[1])
 	var dimensions []string
 	for _, d := range strings.Split(dimStr, ",") {
@@ -221,7 +243,6 @@ func parseCustomTableName(tableName string) (*customAnalyticsConfig, error) {
 		}
 	}
 
-	// Parse metrics
 	metricStr := strings.TrimSpace(parts[2])
 	var metrics []string
 	for _, m := range strings.Split(metricStr, ",") {
@@ -231,7 +252,23 @@ func parseCustomTableName(tableName string) (*customAnalyticsConfig, error) {
 		}
 	}
 
-	// Validate metrics - at least one is required
+	return buildCustomAnalyticsConfig(dimensions, metrics)
+}
+
+// splitValues splits a comma-separated value string into trimmed, non-empty tokens.
+func splitValues(v string) []string {
+	var out []string
+	for _, s := range strings.Split(v, ",") {
+		if t := strings.TrimSpace(s); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// buildCustomAnalyticsConfig validates dimensions and metrics and constructs a
+// customAnalyticsConfig. Shared by both the legacy and query-param code paths.
+func buildCustomAnalyticsConfig(dimensions, metrics []string) (*customAnalyticsConfig, error) {
 	if len(metrics) == 0 {
 		return nil, fmt.Errorf("at least one metric is required")
 	}
@@ -250,7 +287,6 @@ func parseCustomTableName(tableName string) (*customAnalyticsConfig, error) {
 	}
 	pivot := dimensions[dimensionIdx]
 
-	// Determine time granularity
 	var granularity timeGranularity
 	var incrementalKey string
 	var primaryKeys []string
@@ -268,7 +304,6 @@ func parseCustomTableName(tableName string) (*customAnalyticsConfig, error) {
 		return nil, fmt.Errorf("'date' or 'month' is required in dimensions")
 	}
 
-	// Ensure required metrics
 	if !slices.Contains(metrics, "dateRange") {
 		metrics = append(metrics, "dateRange")
 	}

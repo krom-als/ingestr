@@ -15,6 +15,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 	"github.com/simpleforce/simpleforce"
 )
 
@@ -296,10 +297,47 @@ var salesforceTableMeta = map[string]tableMeta{
 	"user_role":                {"UserRole", config.StrategyReplace, nil, ""},
 }
 
+// salesforceParamKeys are the query parameters accepted by the URL-style table form.
+var salesforceParamKeys = []string{"object"}
+
+// parseSalesforceTableSpec resolves a source-table string in either form:
+//
+//	custom?object=My_Object__c   (URL-style; preferred for custom objects)
+//	custom:My_Object__c          (legacy colon form)
+//	account                      (standard table, no params)
+//
+// For the query form the path must be "custom" and "object" is required.
+// The returned name is always the effective legacy form ("custom:<sobject>" or plain name)
+// so downstream logic remains unchanged.
+func parseSalesforceTableSpec(name string) (string, error) {
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return "", err
+	}
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, salesforceParamKeys...); err != nil {
+			return "", err
+		}
+		path = strings.TrimSpace(path)
+		if path != "custom" {
+			return "", fmt.Errorf("URL-style parameters are only supported for custom objects (path must be \"custom\", got %q)", path)
+		}
+		object := strings.TrimSpace(params.Get("object"))
+		if object == "" {
+			return "", fmt.Errorf("object parameter is required for custom Salesforce objects")
+		}
+		return "custom:" + object, nil
+	}
+	return name, nil
+}
+
 func (s *salesforceSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
-	tableName := req.Name
-	if tableName == "" {
+	if req.Name == "" {
 		return nil, fmt.Errorf("table name is required for salesforce source")
+	}
+	tableName, err := parseSalesforceTableSpec(req.Name)
+	if err != nil {
+		return nil, err
 	}
 
 	meta, known := salesforceTableMeta[tableName]

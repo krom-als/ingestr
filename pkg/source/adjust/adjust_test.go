@@ -2,6 +2,8 @@ package adjust
 
 import (
 	"context"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -445,6 +447,291 @@ func TestGetTable_Strategies(t *testing.T) {
 			assert.Equal(t, tt.strategy, dst.TableStrategy)
 			assert.Equal(t, tt.wantPKs, dst.TablePrimaryKeys)
 			assert.Equal(t, tt.wantKey, dst.TableIncrementalKey)
+		})
+	}
+}
+
+func TestGetTable_QueryFormStandard(t *testing.T) {
+	s := NewAdjustSource()
+
+	tests := []struct {
+		name     string
+		table    string
+		wantName string
+		wantPKs  []string
+		wantKey  string
+		strategy config.IncrementalStrategy
+		wantErr  bool
+	}{
+		{
+			name:     "events query form no tokens",
+			table:    "events?app_tokens=",
+			wantName: "events",
+			wantPKs:  []string{"id"},
+			strategy: config.StrategyReplace,
+		},
+		{
+			name:     "events single token",
+			table:    "events?app_tokens=tok1",
+			wantName: "events",
+			wantPKs:  []string{"id"},
+			strategy: config.StrategyReplace,
+		},
+		{
+			name:     "events comma-joined tokens",
+			table:    "events?app_tokens=tok1,tok2",
+			wantName: "events",
+			wantPKs:  []string{"id"},
+			strategy: config.StrategyReplace,
+		},
+		{
+			name:     "events repeated app_tokens keys",
+			table:    "events?app_tokens=tok1&app_tokens=tok2",
+			wantName: "events",
+			wantPKs:  []string{"id"},
+			strategy: config.StrategyReplace,
+		},
+		{
+			name:     "campaigns query form",
+			table:    "campaigns?app_tokens=abc",
+			wantName: "campaigns",
+			wantPKs:  defaultPrimaryKeys,
+			wantKey:  "day",
+			strategy: config.StrategyMerge,
+		},
+		{
+			name:     "creatives query form",
+			table:    "creatives?app_tokens=abc,def",
+			wantName: "creatives",
+			wantPKs:  creativePrimaryKeys,
+			wantKey:  "day",
+			strategy: config.StrategyMerge,
+		},
+		{
+			name:    "unknown param rejected",
+			table:   "events?typo=val",
+			wantErr: true,
+		},
+		{
+			name:    "unsupported table via query form",
+			table:   "unknown?app_tokens=tok1",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tbl, err := s.GetTable(context.Background(), source.TableRequest{Name: tt.table})
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			dst := tbl.(*source.DynamicSourceTable)
+			assert.Equal(t, tt.wantName, dst.TableName)
+			assert.Equal(t, tt.wantPKs, dst.TablePrimaryKeys)
+			assert.Equal(t, tt.wantKey, dst.TableIncrementalKey)
+			assert.Equal(t, tt.strategy, dst.TableStrategy)
+		})
+	}
+}
+
+func TestGetTable_QueryFormCustom(t *testing.T) {
+	s := NewAdjustSource()
+
+	tests := []struct {
+		name     string
+		table    string
+		wantDims string
+		wantMets string
+		wantKey  string
+		wantErr  bool
+	}{
+		{
+			name:     "basic custom query",
+			table:    "custom?dimensions=day,campaign&metrics=installs,clicks",
+			wantDims: "day,campaign",
+			wantMets: "installs,clicks",
+			wantKey:  "day",
+		},
+		{
+			name:     "hour dimension has highest priority",
+			table:    "custom?dimensions=day,hour&metrics=installs",
+			wantDims: "day,hour",
+			wantMets: "installs",
+			wantKey:  "hour",
+		},
+		{
+			name:     "week dimension",
+			table:    "custom?dimensions=week,country&metrics=clicks",
+			wantDims: "week,country",
+			wantMets: "clicks",
+			wantKey:  "week",
+		},
+		{
+			name:    "missing required dimension",
+			table:   "custom?dimensions=campaign&metrics=installs",
+			wantErr: true,
+		},
+		{
+			name:    "empty dimensions",
+			table:   "custom?dimensions=&metrics=installs",
+			wantErr: true,
+		},
+		{
+			name:    "empty metrics",
+			table:   "custom?dimensions=day&metrics=",
+			wantErr: true,
+		},
+		{
+			name:    "unknown param rejected",
+			table:   "custom?dimensions=day&metrics=installs&typo=val",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tbl, err := s.GetTable(context.Background(), source.TableRequest{Name: tt.table})
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			dst := tbl.(*source.DynamicSourceTable)
+			assert.Equal(t, config.StrategyDeleteInsert, dst.TableStrategy)
+			assert.Equal(t, tt.wantKey, dst.TableIncrementalKey)
+			assert.Equal(t, strings.Split(tt.wantDims, ","), dst.TablePrimaryKeys)
+		})
+	}
+}
+
+func TestParseCustomTableQuery(t *testing.T) {
+	tests := []struct {
+		name       string
+		query      string
+		wantDims   string
+		wantMets   string
+		wantFilter map[string]string
+		wantErr    bool
+	}{
+		{
+			name:     "basic dims and metrics",
+			query:    "dimensions=day,campaign&metrics=installs,clicks",
+			wantDims: "day,campaign",
+			wantMets: "installs,clicks",
+		},
+		{
+			name:       "single filters entry",
+			query:      "dimensions=day&metrics=installs&filters=country=US",
+			wantDims:   "day",
+			wantMets:   "installs",
+			wantFilter: map[string]string{"country": "US"},
+		},
+		{
+			name:       "repeated filters keys",
+			query:      "dimensions=day&metrics=installs&filters=country=US&filters=network=facebook",
+			wantDims:   "day",
+			wantMets:   "installs",
+			wantFilter: map[string]string{"country": "US", "network": "facebook"},
+		},
+		{
+			name:       "filters with multi-value (legacy comma form within value)",
+			query:      "dimensions=day&metrics=installs&filters=country=US,GB",
+			wantDims:   "day",
+			wantMets:   "installs",
+			wantFilter: map[string]string{"country": "US,GB"},
+		},
+		{
+			name:    "missing required time dimension",
+			query:   "dimensions=campaign&metrics=installs",
+			wantErr: true,
+		},
+		{
+			name:    "empty dimensions",
+			query:   "dimensions=&metrics=installs",
+			wantErr: true,
+		},
+		{
+			name:    "empty metrics",
+			query:   "dimensions=day&metrics=",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			params, err := url.ParseQuery(tt.query)
+			require.NoError(t, err)
+			dims, mets, filters, err := parseCustomTableQuery(params)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantDims, dims)
+			assert.Equal(t, tt.wantMets, mets)
+			if tt.wantFilter != nil {
+				assert.Equal(t, tt.wantFilter, filters)
+			}
+		})
+	}
+}
+
+func TestQueryFormEquivalence(t *testing.T) {
+	s := NewAdjustSource()
+
+	pairs := []struct {
+		name   string
+		legacy string
+		query  string
+	}{
+		{
+			name:   "events with single app_token",
+			legacy: "events:tok1",
+			query:  "events?app_tokens=tok1",
+		},
+		{
+			name:   "events with multiple app_tokens comma-joined",
+			legacy: "events:tok1,tok2",
+			query:  "events?app_tokens=tok1,tok2",
+		},
+		{
+			name:   "events with multiple app_tokens repeated keys",
+			legacy: "events:tok1,tok2",
+			query:  "events?app_tokens=tok1&app_tokens=tok2",
+		},
+		{
+			name:   "campaigns with app_token",
+			legacy: "campaigns:abc123",
+			query:  "campaigns?app_tokens=abc123",
+		},
+		{
+			name:   "custom basic report",
+			legacy: "custom:day,campaign:installs,clicks",
+			query:  "custom?dimensions=day,campaign&metrics=installs,clicks",
+		},
+		{
+			name:   "custom with hour dimension",
+			legacy: "custom:hour:installs",
+			query:  "custom?dimensions=hour&metrics=installs",
+		},
+	}
+
+	ctx := context.Background()
+	for _, tt := range pairs {
+		t.Run(tt.name, func(t *testing.T) {
+			legacyTbl, err := s.GetTable(ctx, source.TableRequest{Name: tt.legacy})
+			require.NoError(t, err)
+			queryTbl, err := s.GetTable(ctx, source.TableRequest{Name: tt.query})
+			require.NoError(t, err)
+
+			legacyDst := legacyTbl.(*source.DynamicSourceTable)
+			queryDst := queryTbl.(*source.DynamicSourceTable)
+
+			assert.Equal(t, legacyDst.TableStrategy, queryDst.TableStrategy)
+			assert.Equal(t, legacyDst.TablePrimaryKeys, queryDst.TablePrimaryKeys)
+			assert.Equal(t, legacyDst.TableIncrementalKey, queryDst.TableIncrementalKey)
 		})
 	}
 }

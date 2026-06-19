@@ -239,6 +239,211 @@ func TestGetTable(t *testing.T) {
 	})
 }
 
+func TestGetTableCustomParsing(t *testing.T) {
+	t.Parallel()
+
+	s := NewAppsflyerSource()
+
+	tests := []struct {
+		name            string
+		tableStr        string
+		wantName        string
+		wantDims        []string
+		wantMetrics     []string
+		wantPKs         []string
+		wantIncrKey     string
+		wantErr         bool
+		wantErrContains string
+	}{
+		{
+			name:        "basic custom: dims and metrics split on colon",
+			tableStr:    "custom:c,geo:clicks,impressions",
+			wantName:    "custom",
+			wantDims:    []string{"c", "geo", "install_time"},
+			wantMetrics: []string{"clicks", "impressions"},
+			wantPKs:     []string{"campaign", "geo", "install_time"},
+			wantIncrKey: "install_time",
+		},
+		{
+			name:        "install_time auto-added when absent",
+			tableStr:    "custom:c:clicks",
+			wantName:    "custom",
+			wantDims:    []string{"c", "install_time"},
+			wantMetrics: []string{"clicks"},
+			wantPKs:     []string{"campaign", "install_time"},
+			wantIncrKey: "install_time",
+		},
+		{
+			name:        "install_time not duplicated when already present",
+			tableStr:    "custom:c,install_time:clicks",
+			wantName:    "custom",
+			wantDims:    []string{"c", "install_time"},
+			wantMetrics: []string{"clicks"},
+			wantPKs:     []string{"campaign", "install_time"},
+			wantIncrKey: "install_time",
+		},
+		{
+			name:        "whitespace trimmed from dimensions",
+			tableStr:    "custom: c , geo :clicks",
+			wantName:    "custom",
+			wantDims:    []string{"c", "geo", "install_time"},
+			wantMetrics: []string{"clicks"},
+			wantPKs:     []string{"campaign", "geo", "install_time"},
+			wantIncrKey: "install_time",
+		},
+		{
+			name:        "whitespace trimmed from metrics",
+			tableStr:    "custom:c: clicks , impressions ",
+			wantName:    "custom",
+			wantDims:    []string{"c", "install_time"},
+			wantMetrics: []string{"clicks", "impressions"},
+			wantPKs:     []string{"campaign", "install_time"},
+			wantIncrKey: "install_time",
+		},
+		{
+			name:            "too few parts - only one colon segment",
+			tableStr:        "custom:onlyonefield",
+			wantErr:         true,
+			wantErrContains: "invalid custom table format",
+		},
+		{
+			name:            "bare custom with no colon",
+			tableStr:        "custom",
+			wantErr:         true,
+			wantErrContains: "unsupported table",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			table, err := s.GetTable(context.Background(), source.TableRequest{Name: tt.tableStr})
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.wantErrContains != "" {
+					assert.Contains(t, err.Error(), tt.wantErrContains)
+				}
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantName, table.Name())
+			assert.Equal(t, tt.wantPKs, table.PrimaryKeys())
+			assert.Equal(t, tt.wantIncrKey, table.IncrementalKey())
+		})
+	}
+}
+
+func TestGetTableQueryForm(t *testing.T) {
+	t.Parallel()
+
+	s := NewAppsflyerSource()
+
+	tests := []struct {
+		name            string
+		tableStr        string
+		wantName        string
+		wantDims        []string
+		wantMetrics     []string
+		wantPKs         []string
+		wantIncrKey     string
+		wantErr         bool
+		wantErrContains string
+	}{
+		{
+			name:        "query form basic",
+			tableStr:    "custom?dimensions=app_id,geo&metrics=installs,revenue",
+			wantName:    "custom",
+			wantDims:    []string{"app_id", "geo", "install_time"},
+			wantMetrics: []string{"installs", "revenue"},
+			wantPKs:     []string{"app_id", "geo", "install_time"},
+			wantIncrKey: "install_time",
+		},
+		{
+			name:        "query form repeated keys",
+			tableStr:    "custom?dimensions=app_id&dimensions=geo&metrics=installs&metrics=revenue",
+			wantName:    "custom",
+			wantDims:    []string{"app_id", "geo", "install_time"},
+			wantMetrics: []string{"installs", "revenue"},
+			wantPKs:     []string{"app_id", "geo", "install_time"},
+			wantIncrKey: "install_time",
+		},
+		{
+			name:        "query form install_time not duplicated",
+			tableStr:    "custom?dimensions=app_id,install_time&metrics=clicks",
+			wantName:    "custom",
+			wantDims:    []string{"app_id", "install_time"},
+			wantMetrics: []string{"clicks"},
+			wantPKs:     []string{"app_id", "install_time"},
+			wantIncrKey: "install_time",
+		},
+		{
+			name:        "query form mapped dimension c->campaign",
+			tableStr:    "custom?dimensions=c,geo&metrics=installs",
+			wantName:    "custom",
+			wantDims:    []string{"c", "geo", "install_time"},
+			wantMetrics: []string{"installs"},
+			wantPKs:     []string{"campaign", "geo", "install_time"},
+			wantIncrKey: "install_time",
+		},
+		{
+			name:            "query form unknown key rejected",
+			tableStr:        "custom?dimensions=app_id&filters=geo",
+			wantErr:         true,
+			wantErrContains: "unknown table parameter",
+		},
+		{
+			name:            "query form on non-custom table rejected",
+			tableStr:        "campaigns?dimensions=app_id",
+			wantErr:         true,
+			wantErrContains: "query parameters are only supported for the custom table",
+		},
+		{
+			name:            "bare custom still unsupported-table error (legacy quirk)",
+			tableStr:        "custom",
+			wantErr:         true,
+			wantErrContains: "unsupported table",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			table, err := s.GetTable(context.Background(), source.TableRequest{Name: tt.tableStr})
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.wantErrContains != "" {
+					assert.Contains(t, err.Error(), tt.wantErrContains)
+				}
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantName, table.Name())
+			assert.Equal(t, tt.wantPKs, table.PrimaryKeys())
+			assert.Equal(t, tt.wantIncrKey, table.IncrementalKey())
+		})
+	}
+}
+
+func TestSplitCommaSep(t *testing.T) {
+	t.Run("comma-joined single value", func(t *testing.T) {
+		assert.Equal(t, []string{"a", "b", "c"}, splitCommaSep([]string{"a,b,c"}))
+	})
+	t.Run("repeated values", func(t *testing.T) {
+		assert.Equal(t, []string{"a", "b", "c"}, splitCommaSep([]string{"a", "b", "c"}))
+	})
+	t.Run("mixed", func(t *testing.T) {
+		assert.Equal(t, []string{"a", "b", "c", "d"}, splitCommaSep([]string{"a,b", "c", "d"}))
+	})
+	t.Run("trims whitespace", func(t *testing.T) {
+		assert.Equal(t, []string{"a", "b"}, splitCommaSep([]string{" a , b "}))
+	})
+	t.Run("empty input", func(t *testing.T) {
+		assert.Nil(t, splitCommaSep(nil))
+	})
+}
+
 func TestReadWithMockServer(t *testing.T) {
 	mockData := []map[string]any{
 		{
