@@ -13,6 +13,7 @@ import (
 	"github.com/bruin-data/ingestr/pkg/arrowconv"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
 )
@@ -138,7 +139,36 @@ func (s *GoogleSheetsSource) GetTable(ctx context.Context, req source.TableReque
 	}, nil
 }
 
+// googleSheetsParamKeys are the query parameters recognized by the URL-style
+// source-table form (see parseTableName).
+var googleSheetsParamKeys = []string{"sheet"}
+
+// parseTableName parses a source-table string in one of two forms:
+//
+//	<spreadsheet_id>?sheet=<sheet_name>  (URL-style query parameter; preferred)
+//	<spreadsheet_id>.<sheet_name>        (legacy dot form; both parts required)
+//
+// The query form is selected only when the text after the last "?" looks like a
+// parameter block, so a "?" used literally in a sheet name (legacy dot form) is
+// not mistakenly treated as a query delimiter.
 func parseTableName(table string) (string, string, error) {
+	path, params, hasQuery, err := tablespec.Split(table)
+	if err != nil {
+		return "", "", err
+	}
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, googleSheetsParamKeys...); err != nil {
+			return "", "", err
+		}
+		spreadsheetID := path
+		sheetName := strings.TrimSpace(params.Get("sheet"))
+		if spreadsheetID == "" || sheetName == "" {
+			return "", "", fmt.Errorf("invalid table name %q: expected format spreadsheet_id?sheet=sheet_name (e.g. fkdUQ2bjdNfUq2CA?sheet=Sheet1)", table)
+		}
+		return spreadsheetID, sheetName, nil
+	}
+
+	// Legacy dot form: <spreadsheet_id>.<sheet_name>
 	parts := strings.SplitN(table, ".", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return "", "", fmt.Errorf("invalid table name %q: expected format spreadsheet_id.sheet_name (e.g. fkdUQ2bjdNfUq2CA.Sheet1)", table)
