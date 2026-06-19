@@ -74,7 +74,7 @@ Slack source allows ingesting the following sources into separate tables:
 |-------|----|---------|--------------|---------|
 | [channels](https://api.slack.com/methods/conversations.list) | id | - | replace | Retrieves information about all the channels |
 | [users](https://api.slack.com/methods/users.list) | id | - | replace | Retrieves all the users|
-| [messages:chan1,chan2](https://api.slack.com/methods/conversations.history) | ts | ts | append/merge | Retrieves messages from specified channels (e.g., general, memes). Multiple channels can be listed separated by commas |
+| [messages:chan1,chan2](https://api.slack.com/methods/conversations.history) | ts | ts | append/merge | Retrieves messages from specified channels (e.g., general, memes). Multiple channels can be listed separated by commas. An alternative query-parameter form is also accepted: `messages?channel_ids=C012AB3CD&channel_ids=general` (the legacy comma form still works). |
 | [access_logs](https://api.slack.com/methods/team.accessLogs) | user_id | - | append | Retrieves access logs|
 
 

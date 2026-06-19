@@ -106,6 +106,8 @@ Where the options and parameters vary by metric type.
 - Example for shutdowns in India: `net_loss:shutdown:IN`
 - Example for internet blocking in Japan: `net_loss:blocking:JP`
 
+As an alternative to the positional colon syntax, you can use named query parameters — e.g., `net_loss?shutdown_type=shutdown&country=US`. Supported keys vary by metric: `country`, `topsites`, `shutdown_type`, `ip_version`. The legacy colon form still works.
+
 ### Resilience Metrics
 
 - Global resilience: `resilience`

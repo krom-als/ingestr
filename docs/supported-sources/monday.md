@@ -70,6 +70,8 @@ ingestr ingest --source-table "board_columns:5091839751,5091841857" ...
 ingestr ingest --source-table "updates:5091841883" ...
 ```
 
+The colon-separated form above is also accepted as URL-style query parameters — for example, `items?board_ids=12345&board_ids=67890&linked=true` is equivalent to `items:12345,67890:linked`. The legacy colon form continues to work.
+
 ### `items:<board_id>:linked`
 
 `items` additionally supports a `:linked` suffix that treats the given board as a "master" board and also pulls items from any **sub-boards whose name matches one of the master's item titles**. Useful for a "master board → linked sub-boards" fan-out pattern where the master's items name the sub-boards. Requires at least one master board id.

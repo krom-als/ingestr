@@ -25,6 +25,8 @@ user_ad_revenue:com.example.app1,com.example.app2
 
 - `application_id` should be the application package name (for Android and Fire OS) or bundle ID (for iOS).
 
+An alternative query-parameter form is also accepted and equivalent: `user_ad_revenue?app_ids=com.a&app_ids=com.b`. The legacy colon form (`user_ad_revenue:com.a,com.b`) still works.
+
 ## Setting up Applovin Integration
 
 ### Generate a Report Key

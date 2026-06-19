@@ -19,6 +19,7 @@ URI Parameters:
 * `issuer_id`: Issuer ID of the generated key
 * `app_id`: optional, application ID of your app. You can specify `app_id` multiple times with different ids to ingest data for multiple apps.
   * You can also define the app_id in the table name. For example, `app-downloads-detailed:12345,67890` will ingest data for app with id `12345` and `67890`.
+  * An alternative query-parameter form is also accepted and equivalent: `app-downloads-detailed?app_ids=12345&app_ids=67890`.
 
 ## Setting up Appstore Integration
 

@@ -101,6 +101,8 @@ The `custom` table uses LinkedIn's [Analytics Finder API](https://learn.microsof
 custom:<dimensions>:<metrics>
 ```
 
+An alternative query-parameter form is also accepted and equivalent: `custom?dimensions=campaign,date&metrics=impressions,clicks` (the legacy colon form still works).
+
 **Parameters:**
 - `dimensions`(required): A comma-separated list of dimensions is required. It must include one pivot dimension and one time-based dimension (`date` or `month`).
   - Pivot dimensions (pick one):

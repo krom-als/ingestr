@@ -62,6 +62,8 @@ The PostHog source allows you to ingest the following tables:
 | property_definitions:event | id | updated_at | merge | Event property definitions |
 | property_definitions:person | id | updated_at | merge | Person property definitions |
 | property_definitions:session | id | updated_at | merge | Session property definitions |
+
+The `property_definitions` sub-type can also be specified as a query parameter — `property_definitions?variant=event` is equivalent to `property_definitions:event`. The legacy colon form continues to work.
 | annotations | id | updated_at | merge | Project annotations |
 
 Use these as the `--source-table` parameter in the `ingestr ingest` command.

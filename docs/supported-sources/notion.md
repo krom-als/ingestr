@@ -62,6 +62,8 @@ ingestr ingest --source-uri 'notion://?api_key=secret_12345' --source-table 'bfe
 
 The result of this command will be a table in the `notion.duckdb` database with JSON columns. 
 
+To ingest all databases instead of a single one, use `*` as the source table, or equivalently the query-parameter form: `--source-table '?all=true'`. The legacy `*` form still works.
+
 > [!CAUTION]
 > Notion does not support incremental loading, which means every time you run the command, it will copy the entire table from Notion to the destination. This can be slow for large tables.
 

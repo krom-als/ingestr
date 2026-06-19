@@ -46,7 +46,7 @@ To connect to Airtable, you need to create a Personal Access Token.
 
 Once you have the Access Token: 
 
-The source table you'll use for ingestr will be `<base_id>/<table_id>`.
+The source table you'll use for ingestr will be `<base_id>/<table_id>`. As an alternative, you can pass the base ID as a query parameter: `tblYYY?base_id=appXXX` — the legacy slash form still works.
 
 ### Getting your Base ID and Table ID
 

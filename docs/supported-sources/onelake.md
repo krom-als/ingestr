@@ -25,6 +25,8 @@ The **mode and table** come from `--dest-table`, mirroring OneLake's path layout
 - `Files/<path>` → raw Parquet files
 - a bare name with no prefix defaults to `Tables/`
 
+As an alternative to the prefix form, you can use the `area` query parameter — e.g. `mydata?area=tables` is equivalent to `Tables/mydata`, and `mydata?area=files` is equivalent to `Files/mydata`. The prefix form continues to work.
+
 The final object path is:
 `https://onelake.dfs.fabric.microsoft.com/<workspace>/<lakehouse>.Lakehouse/<Tables|Files>/<rest>`
 

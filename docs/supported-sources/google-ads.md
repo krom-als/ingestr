@@ -128,6 +128,12 @@ ingestr ingest \
   --dest-table "public.campaigns"
 ```
 
+An alternative query-parameter form is also accepted:
+
+```sh
+--source-table 'campaign_report_daily?customer_ids=123'
+```
+
 This will use `1234567890` and `0987654321` instead of `default_customer` from the URI.
 
 ## Tables
@@ -154,6 +160,12 @@ This will use `1234567890` and `0987654321` instead of `default_customer` from t
 The format of a custom report looks like the following:
 ```
 daily:{resource_name}:{dimensions}:{metrics}:{customer_ids}
+```
+
+An alternative query-parameter form is also accepted:
+
+```sh
+--source-table 'daily?resource=campaign&dimensions=campaign.id&metrics=clicks&customer_ids=123'
 ```
 Where:
 * `{resource_name}` is a [Google Ads Resource](https://developers.google.com/google-ads/api/fields/v18/overview_query_builder#list-of-all-resources).

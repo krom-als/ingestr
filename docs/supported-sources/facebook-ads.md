@@ -117,6 +117,12 @@ ingestr ingest \
   --dest-table 'dest.campaigns'
 ```
 
+An equivalent query-parameter form is also accepted:
+
+```sh
+--source-table 'campaigns?account_ids=1234567890&account_ids=9876543210'
+```
+
 ### Facebook Insights Custom Configuration
 
 The `facebook_insights` table supports advanced configuration for breakdowns and custom fields:
@@ -124,6 +130,16 @@ The `facebook_insights` table supports advanced configuration for breakdowns and
 #### Format Options
 
 There are two distinct configuration modes:
+
+An alternative query-parameter form is also accepted for `facebook_insights`:
+
+```sh
+# Predefined breakdown via query params
+--source-table 'facebook_insights?breakdown=ads_insights_age_and_gender'
+
+# Custom dimensions and fields via query params (with optional account IDs)
+--source-table 'facebook_insights?dimensions=age,gender&fields=impressions,clicks&level=campaign&account_ids=123'
+```
 
 **Mode 1: Predefined Breakdowns**
 - **Format**: `facebook_insights:breakdown_type` or `facebook_insights:breakdown_type:field1,field2,field3`

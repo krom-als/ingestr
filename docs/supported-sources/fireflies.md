@@ -81,6 +81,8 @@ ingestr ingest \
   --interval-end '2024-01-31'
 ```
 
+An alternative query-parameter form is also accepted and equivalent: `--source-table 'analytics?granularity=DAY'`. The legacy colon form (`analytics:DAY`) still works.
+
 > [!NOTE]
 > Smaller granularity means more API requests. Use `analytics:HOUR` only for short date ranges to avoid rate limiting.
 

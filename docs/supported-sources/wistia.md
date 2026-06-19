@@ -39,7 +39,7 @@ Available Data API tables:
 | `folder_sharings:<folder_id>` | Sharing records for a folder. |
 | `subfolders:<folder_id>` | Subfolders for a folder. |
 | `medias` | Media records. |
-| `media:<media_id>` | A single media record. |
+| `media:<media_id>` | A single media record. An alternative query-parameter form is also accepted: `media?id=<media_id>`. |
 | `captions` | Captions across the account. |
 | `captions:<media_id>` | Captions filtered by media. |
 | `media_captions:<media_id>` | Captions for a media. |

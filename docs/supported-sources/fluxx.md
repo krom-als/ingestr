@@ -294,7 +294,7 @@ Use these as `--source-table` parameter in the `ingestr ingest` command.
 
 Each resource contains numerous fields. You can:
 1. **Ingest all fields**: Use the resource name directly (e.g., `grant_request`)
-2. **Select specific fields**: Use colon syntax (e.g., `grant_request:id,name,amount_requested`)
+2. **Select specific fields**: Use colon syntax (e.g., `grant_request:id,name,amount_requested`), or equivalently the query-parameter form for a single resource (e.g., `grant?fields=id,amount_requested,status`). The legacy colon form still works; multi-resource ingestion continues to use the comma-separated resource form.
 
 The field selection feature is particularly useful for large resources like `grant_request` which has over 300 fields.
 

@@ -121,6 +121,8 @@ Where:
 * `{report_type}` is the [report type](https://developers.applovin.com/en/app-discovery/api/reporting-api#required-parameters) (one of `publisher` or `advertiser`)
 * `{columns}` are the [columns](https://developers.applovin.com/en/app-discovery/api/reporting-api#allowed-publisher-columns) of the given report type.
 
+An alternative query-parameter form is also accepted and equivalent: `custom?endpoint=report&report_type=advertiser&dimensions=day,campaign` (the legacy colon form still works).
+
 
 ### Custom Report Example
 For this example, we will ingest data from `report` end point with the report type `publisher`.

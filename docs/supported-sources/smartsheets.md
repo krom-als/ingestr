@@ -34,12 +34,13 @@ To set up a Smartsheet integration, you'll need an API Access Token.
 
 The sheet to ingest is identified by its `sheet_id`. You can find the `sheet_id` by opening the sheet in Smartsheet and going to File > Properties. The Sheet ID will be listed there.
 
-`--source-table` accepts three forms:
+`--source-table` accepts the following forms:
 
 | Form | Behaviour |
 | --- | --- |
 | `<sheet_id>` | Use the value as the sheet ID. |
 | `sheet:<sheet_id>` | Strip the `sheet:` prefix and use the rest as the sheet ID. |
+| `sheet?sheet_id=<sheet_id>` | Alternative query-parameter form, equivalent to `sheet:<sheet_id>`. |
 | `sheet` | Use the `smartsheet_id` URI parameter. Errors if it isn't set. |
 
 A literal value (`<sheet_id>` or `sheet:<sheet_id>`) always wins over the URI parameter — the URI's `smartsheet_id` is only consulted when `--source-table` is `sheet`.

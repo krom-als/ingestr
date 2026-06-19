@@ -39,5 +39,7 @@ ingestr ingest \
 
 The `--source-table` specifies `/path/to/directory` The base directory on the server where `ingestr` should start looking for files.
 
+Format hints can be supplied with the `#` fragment form (e.g. `exports/*.jsonl#jsonl`) or equivalently with query-parameter syntax (e.g. `exports/*.jsonl?format=jsonl`). A `?` inside the path (glob wildcard) is unaffected; only a trailing `?key=value` block is treated as parameters. The legacy `#` form continues to work.
+
 
 

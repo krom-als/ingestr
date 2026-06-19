@@ -66,6 +66,12 @@ These resources can fetch data for a specific ad account, multiple ad accounts, 
 - `table:ad_account_id` - fetch data for a specific ad account
 - `table:id1,id2,id3` - fetch data for multiple ad accounts
 
+An alternative query-parameter form is also accepted:
+
+```sh
+--source-table 'campaigns?account_ids=acc1&account_ids=acc2'
+```
+
 | Table           | PK | Inc Key | Inc Strategy | Details                                                                                                                                        |
 | --------------- | ----------- | --------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `campaigns` | id | updated_at | merge | Retrieves all campaigns for ad account(s). Supports `campaigns:ad_account_id` or `campaigns:id1,id2,id3` |
@@ -114,6 +120,12 @@ Snapchat Ads source supports fetching stats/measurement data for campaigns, ad s
 - With ad breakdown: `campaigns_stats:ad,HOUR:impressions,spend`
 - With adsquad breakdown: `campaigns_stats:adsquad,DAY:impressions,swipes`
 - Ad account stats with campaign breakdown: `ad_accounts_stats:campaign,DAY:spend`
+
+An alternative query-parameter form is also accepted for stats resources:
+
+```sh
+--source-table 'campaigns_stats?granularity=DAY&breakdown=campaign&dimension=GEO&pivot=country&metrics=impressions,spend'
+```
 
 ## Examples
 

@@ -51,8 +51,11 @@ You can also ingest custom tables by providing a list of dimensions and metrics.
 The format for the custom table is:
 
 ```plaintext
-custom:<dimension1>,<dimension2>,<metric1>,<metric2>
+custom:<dimensions>:<metrics>
 ```
+
+An alternative query-parameter form is also accepted and equivalent: `custom?dimensions=app_id,geo&metrics=installs,revenue` (the legacy colon form still works).
+
 Parameters:
 - `dimensions`: A comma-separated list of [dimensions](https://support.appsflyer.com/hc/en-us/articles/213223166-Master-API-user-acquisition-metrics-via-API#groupings) to retrieve.
 - `metrics`: A comma-separated list of [metrics](https://support.appsflyer.com/hc/en-us/articles/213223166-Master-API-user-acquisition-metrics-via-API#kpis) to retrieve.

@@ -73,6 +73,8 @@ Based on this assumption, here's a sample command that will copy the data from t
 
 ```sh
 ingestr ingest --source-uri 'gsheets://?credentials_path=/path/to/file.json' --source-table 'fkdUQ2bjdNfUq2CA.Sheet1' --dest-uri duckdb:///gsheets.duckdb --dest-table 'dest.output'
+
+An alternative equivalent form passes the sheet as a query parameter: `--source-table 'fkdUQ2bjdNfUq2CA?sheet=Sheet1'`. The `sheet` value also accepts an A1 range (e.g., `Sheet1!A1:C100`). The legacy dot form still works.
 ```
 
 The result of this command will be a table in the `gsheets.duckdb` database.

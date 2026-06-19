@@ -172,6 +172,12 @@ ingestr ingest \
   --dest-table 'contacts.property_history'
 ```
 
+An alternative query-parameter form is also accepted for filtering properties:
+
+```sh
+--source-table 'property_history:contacts?properties=email'
+```
+
 Fetch only `amount` and `dealstage` history for deals:
 
 ```sh
@@ -210,6 +216,12 @@ ingestr ingest \
   --source-table 'contacts:' \
   --dest-uri duckdb:///hubspot.duckdb \
   --dest-table 'contacts.data'
+```
+
+An alternative query-parameter form is also accepted:
+
+```sh
+--source-table 'contacts?associations=companies&associations=deals'
 ```
 
 ## Incremental Loading
@@ -257,6 +269,12 @@ ingestr ingest \
   --source-table 'custom:licenses:companies,deals,contacts' \
   --dest-uri duckdb:///hubspot.duckdb \
   --dest-table 'licenses.data'
+```
+
+An alternative query-parameter form is also accepted for custom objects:
+
+```sh
+--source-table 'custom?object=myObj&associations=assoc'
 ```
 
 When you include associations, the response will contain information about the related objects, allowing you to track relationships between your custom objects and standard HubSpot objects.

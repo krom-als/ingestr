@@ -69,6 +69,8 @@ ingestr ingest \
 
 Will only load versions of non-archived projects.
 
+An alternative, equivalent form uses a query parameter: `project_versions?skip_archived=true`. The legacy `:skip_archived` suffix continues to work.
+
 ## Incremental Loading
 
 The `issues` table supports incremental loading based on the `updated` field. This means subsequent runs will only fetch issues that have been modified since the last run, making the data ingestion more efficient for large Jira instances.

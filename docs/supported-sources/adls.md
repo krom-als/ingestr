@@ -58,6 +58,8 @@ For sources, the path can be a single file or a glob pattern. Add a format hint 
 <file-system>/<path-or-glob>#parquet
 ```
 
+Alternatively, query-parameter syntax is an equivalent form — e.g. `lakehouse/exports/**/*.csv?format=csv&encoding=utf-8` instead of `lakehouse/exports/**/*.csv#csv,encoding=utf-8`. A `?` inside the path (glob wildcard) is unaffected; only a trailing `?key=value` block is treated as parameters. The legacy `#` form continues to work.
+
 For destinations, the file system must already exist. `ingestr` creates any missing directories under the file system and writes parquet files to the selected path.
 
 ## Example: Reading data from ADLS Gen2
@@ -103,7 +105,7 @@ lakehouse/
     `-- <load_id>.<file_id>.parquet
 ```
 
-The default layout writes parquet files directly under the selected path. You can customize this with the `layout` parameter:
+The default layout writes parquet files directly under the selected path. You can customize this with the `layout` parameter. As an alternative to setting `layout` in the URI, you can append it to the `--dest-table` value — e.g. `--dest-table 'lakehouse/records?layout={table_name}.{ext}'` — which is convenient when you want a different layout per table.
 
 ```sh
 ingestr ingest \

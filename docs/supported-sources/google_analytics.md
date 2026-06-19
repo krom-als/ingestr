@@ -92,6 +92,12 @@ ingestr ingest \
     --dest-table "dest.custom"
 ```
 
+An alternative query-parameter form is also accepted:
+
+```sh
+--source-table "custom?dimensions=date,source&metrics=sessions"
+```
+
 This command will retrieve report and save it to the `dest.custom` table in the DuckDB database.
 
 <img alt="google_analytics_img" src="../media/googleanalytics.png" />
@@ -124,6 +130,13 @@ ingestr ingest \
     --dest-uri "duckdb:///analytics.duckdb" \
     --dest-table "dest.realtime"
 ```
+
+An alternative query-parameter form is also accepted:
+
+```sh
+--source-table "realtime?dimensions=country&metrics=activeUsers&minute_ranges=1-5,6-10"
+```
+
 This command will retrieve report and save it to the `dest.realtime` table in the DuckDB database.
 
 <img alt="google_analytics_realtime_report_img" src="../media/google_analytics_realtime_report.png"/>

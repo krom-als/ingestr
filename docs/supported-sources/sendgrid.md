@@ -59,7 +59,7 @@ SendGrid source allows ingesting the following sources into separate tables:
 
 Use one of these as the `--source-table` parameter in the `ingestr ingest` command.
 
-The `global_stats` table accepts an optional granularity suffix — `global_stats`, `global_stats:week`, or `global_stats:month` (defaults to daily).
+The `global_stats` table accepts an optional granularity suffix — `global_stats`, `global_stats:week`, or `global_stats:month` (defaults to daily). An alternative, equivalent form uses a query parameter: `global_stats?granularity=week`. The legacy colon suffix continues to work.
 
 ## Examples
 

@@ -134,7 +134,7 @@ Salesforce source allows ingesting the following objects into separate tables:
 |  `pricebook_entry`   | id | - | replace  | Represents a specific price for a product in a price book. |
 |  `task`   | id | last_timestamp | merge | Used to track and manage various activities and tasks within the Salesforce platform.  |
 |  `event`   | id | last_timestamp | merge | Used to track and manage calendar-based events, such as meetings, appointments, or calls. |
-|  `custom:<custom_object_name>`   | - | - | replace | Track and store data that’s unique to your organization. For more information about custom objects in Salesforce, read [here](https://developer.salesforce.com/docs/atlas.en-us.object_reference.meta/object_reference/sforce_api_objects_custom_objects.htm)|
+|  `custom:<custom_object_name>`   | - | - | replace | Track and store data that’s unique to your organization. An alternative query-parameter form is also accepted and equivalent: `custom?object=My_Object__c` (the legacy colon form still works). For more information about custom objects in Salesforce, read [here](https://developer.salesforce.com/docs/atlas.en-us.object_reference.meta/object_reference/sforce_api_objects_custom_objects.htm)|
 
 Use these as `--source-table` parameters in the `ingestr ingest` command.
 

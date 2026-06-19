@@ -28,6 +28,8 @@ Custom Table Format:
 custom:<dimensions>:<metrics>[:<filter_name,filter_values>]
 ```
 
+An alternative query-parameter form is also accepted and equivalent: `custom?dimensions=campaign_id,stat_time_day&metrics=impressions,spend&filters=campaign_id=111,222` (the legacy colon form still works).
+
 ### Parameters:
 - `dimensions`(required): A comma-separated list of [dimensions](https://business-api.tiktok.com/portal/docs?id=1751443956638721) to retrieve.
 - `metrics`(required): A comma-separated list of [metrics](https://business-api.tiktok.com/portal/docs?id=1751443967255553) to retrieve.

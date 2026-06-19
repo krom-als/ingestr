@@ -37,6 +37,6 @@ Phantombuster source allows ingesting the following sources into separate tables
 
 | Table           | PK | Inc Key | Inc Strategy | Details                                                                                                                                       |
 | --------------- | ----------- | --------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| [completed_phantoms:<agent_id>](https://hub.phantombuster.com/reference/get_containers-fetch-all) | container_id | ended_at     | merge               | Gets all containers associated to a specified agent. Where agent id is a unique identifier for a specific Phantom which can be found in URI of a specific phantom. |
+| [completed_phantoms:<agent_id>](https://hub.phantombuster.com/reference/get_containers-fetch-all) | container_id | ended_at     | merge               | Gets all containers associated to a specified agent. Where agent id is a unique identifier for a specific Phantom which can be found in URI of a specific phantom. An alternative query-parameter form is also accepted: `completed_phantoms?agent_id=<agent_id>`. |
 
 Use this as `--source-table` parameter in the `ingestr ingest` command.

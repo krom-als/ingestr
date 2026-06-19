@@ -57,3 +57,5 @@ Primer source allows ingesting the following sources into separate tables:
 | `payments` | Contains detailed payment information including payment IDs, statuses, amounts, and transaction metadata |
 
 Use these as `--source-table` parameter in the `ingestr ingest` command.
+
+To filter by payment status, an alternative query-parameter form is also accepted: `--source-table 'payments?statuses=SETTLED&statuses=AUTHORIZED'`. The legacy colon form (`payments:SETTLED,AUTHORIZED`) still works.

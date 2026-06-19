@@ -34,7 +34,7 @@ The FundraiseUp source supports the following tables:
 | Table           | PK | Inc Key | Inc Strategy | Details                                                                                                                                        |
 | --------------- | ----------- | --------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `donations`       | id | - | replace               | All donation records including amounts, supporters, and payment details |
-| `donations:incremental`       | id | - | merge               | All donation records including amounts, supporters, and payment details. Loads records incrementally. |
+| `donations:incremental`       | id | - | merge               | All donation records including amounts, supporters, and payment details. Loads records incrementally. Also accepted as `donations?incremental=true` — the legacy `:incremental` suffix continues to work. |
 | `events`       | id | - | replace               | Audit log events for tracking changes and activities |
 | `fundraisers`       | id | - | replace               | Fundraiser campaigns (requires appropriate API permissions) |
 | `recurring_plans`       | id | - | replace               | Recurring donation plans and subscription details |

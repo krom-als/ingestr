@@ -60,6 +60,14 @@ The source table identifies a file (or a glob of files) within the site's defaul
 > [!NOTE]
 > If a glob pattern has no file extension (e.g. `Reports/**`), each matched file's format is detected from its own extension, so one glob can span mixed `.xlsx` and `.csv` files. Add an `xlsx`/`csv` hint to force a single format for all matches.
 
+An alternative, equivalent form uses URL-style query parameters instead of the `#key=value` syntax — useful when the path itself contains characters that conflict with the `#` separator:
+
+```
+Reports/q1.xlsx?sheet=Sheet1&skip=2
+```
+
+The same hint keys apply (`sheet`, `sheets`, `skip`, `encoding`, `sep`, `format`, `raw`, `formatted`, `drop_empty`, `date_cols`). The `#`-style legacy form continues to work.
+
 Examples:
 
 ```

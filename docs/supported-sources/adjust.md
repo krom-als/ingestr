@@ -46,6 +46,8 @@ ingestr ingest --source-uri 'adjust://?api_key=nr_123' \
 --dest-table 'adjust.output'
 ```
 
+An alternative query-parameter form is also accepted and equivalent: `events?app_tokens=tok1,tok2` (the legacy colon form still works).
+
 This works for `events`, `campaigns`, and `creatives` tables. For custom tables, use the `app_token__in` filter in the filters section instead (see below).
 
 ### Lookback days
@@ -69,6 +71,11 @@ The custom table allows you to retrieve data based on specific dimensions and me
 The format for the custom table is: 
 ```plaintext
 custom:<dimensions>:<metrics>[:<filters>]
+```
+
+An alternative query-parameter form is also accepted and equivalent:
+```plaintext
+custom?dimensions=day,campaign&metrics=installs&filters=country=US
 ```
 
 Parameters:

@@ -80,6 +80,8 @@ my-org-bucket/
 
 The value of `load_id` and `file_id` is determined at runtime. The default layout creates a folder with the same table name as the source and places the data inside a parquet file. This layout is configurable using the `layout` parameter.
 
+As an alternative to setting `layout` in the URI, you can append it directly to the `--dest-table` value — e.g. `--dest-table 'my-org-bucket/records?layout={table_name}.{ext}'`. This is equivalent to the URI `layout` parameter and is convenient when you want different layouts per destination table.
+
 For example, if you would like to create a parquet file with the same name as the source table (as opposed to a folder) you can set `layout` to `{table_name}.{ext}` in the command line above:
 
 ```sh
@@ -179,6 +181,8 @@ Supported format hints include:
 - `#csv_headless` - For CSV files without headers
 - `#jsonl` - For line-delimited JSON files
 - `#parquet` - For Parquet format files
+
+Alternatively, you can use query-parameter syntax instead of the `#` fragment form — e.g. `my-org-bucket/data/**/*.csv?format=csv&encoding=utf-8` is equivalent to `my-org-bucket/data/**/*.csv#csv,encoding=utf-8`. Note that a `?` appearing inside the path (as a glob wildcard character) is unaffected; only a trailing `?key=value` block is interpreted as parameters. The legacy `#` form continues to work.
 
 ::: tip
 File type hinting works with `gzip` compressed files as well.

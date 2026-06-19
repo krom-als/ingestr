@@ -103,6 +103,8 @@ ingestr ingest --source-uri 'stripe://?api_key=sk_test_12345' --source-table 'su
 ingestr ingest --source-uri 'stripe://?api_key=sk_test_12345' --source-table 'charges:sync:incremental' --dest-uri duckdb:///stripe.duckdb --dest-table 'dest.charges' --interval-start '2024-01-01' --interval-end '2024-01-31'
 ```
 
+An alternative query-parameter form is also accepted and equivalent: `--source-table 'charge?mode=sync&incremental=true'`. The legacy colon form (`charge:sync:incremental`) still works.
+
 ### Choosing the Right Approach
 
 | Approach | Speed | Data Completeness | Use Case |

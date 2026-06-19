@@ -101,6 +101,8 @@ ingestr ingest \
   --dest-table 'customerio.campaign_metrics'
 ```
 
+An alternative query-parameter form is also accepted and equivalent: `--source-table 'campaign_metrics?period=days'`. The legacy colon form (`campaign_metrics:days`) still works.
+
 ### People and Objects
 
 ```sh
