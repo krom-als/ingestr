@@ -15,6 +15,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -107,12 +108,26 @@ func (s *FreshdeskSource) GetTable(ctx context.Context, req source.TableRequest)
 	}, nil
 }
 
-func parseTableName(table string) (string, string) {
-	parts := strings.SplitN(table, ":", 2)
+var freshdeskParamKeys = []string{"query"}
+
+func parseTableName(name string) (string, string) {
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return name, ""
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, freshdeskParamKeys...); err != nil {
+			return name, ""
+		}
+		return strings.TrimSpace(path), params.Get("query")
+	}
+
+	parts := strings.SplitN(name, ":", 2)
 	if len(parts) == 2 {
 		return parts[0], parts[1]
 	}
-	return table, ""
+	return name, ""
 }
 
 func (s *FreshdeskSource) read(ctx context.Context, table, query string, opts source.ReadOptions) (<-chan source.RecordBatchResult, error) {

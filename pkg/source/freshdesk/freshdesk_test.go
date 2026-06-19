@@ -216,3 +216,120 @@ func TestJsonUseNumber(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+func TestParseTableName_QueryForm(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantBase  string
+		wantQuery string
+	}{
+		{
+			name:      "simple query param",
+			input:     "tickets?query=status:2 OR priority:1",
+			wantBase:  "tickets",
+			wantQuery: "status:2 OR priority:1",
+		},
+		{
+			name:      "compound query with AND",
+			input:     "tickets?query=status:2 AND priority:3",
+			wantBase:  "tickets",
+			wantQuery: "status:2 AND priority:3",
+		},
+		{
+			name:      "empty query param",
+			input:     "tickets?query=",
+			wantBase:  "tickets",
+			wantQuery: "",
+		},
+		{
+			name:      "percent-encoded equals in query value",
+			input:     "tickets?query=status%3D2",
+			wantBase:  "tickets",
+			wantQuery: "status=2",
+		},
+		{
+			name:      "non-tickets table no query",
+			input:     "agents",
+			wantBase:  "agents",
+			wantQuery: "",
+		},
+		{
+			name:      "unknown param key falls back to legacy",
+			input:     "tickets?unknown=foo",
+			wantBase:  "tickets?unknown=foo",
+			wantQuery: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base, query := parseTableName(tt.input)
+			assert.Equal(t, tt.wantBase, base)
+			assert.Equal(t, tt.wantQuery, query)
+		})
+	}
+}
+
+// TestParseTableName_Equivalence asserts that the legacy colon form and the
+// URL-style query form produce identical (base, query) results.
+func TestParseTableName_Equivalence(t *testing.T) {
+	cases := []struct {
+		legacy   string
+		queryFrm string
+	}{
+		{
+			legacy:   "tickets:status:2 OR priority:1",
+			queryFrm: "tickets?query=status:2 OR priority:1",
+		},
+		{
+			legacy:   "tickets:priority:>3",
+			queryFrm: "tickets?query=priority:>3",
+		},
+		{
+			legacy:   "tickets:status:2 AND priority:3",
+			queryFrm: "tickets?query=status:2 AND priority:3",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.legacy, func(t *testing.T) {
+			legacyBase, legacyQuery := parseTableName(c.legacy)
+			newBase, newQuery := parseTableName(c.queryFrm)
+			assert.Equal(t, legacyBase, newBase, "base mismatch")
+			assert.Equal(t, legacyQuery, newQuery, "query mismatch")
+		})
+	}
+}
+
+// TestParseTableName_QuestionMarkInLegacyQuery verifies that a legacy query
+// value containing a literal "?" does not trigger the URL-style branch.
+func TestParseTableName_QuestionMarkInLegacyQuery(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantBase  string
+		wantQuery string
+	}{
+		{
+			name:      "question mark in subject value",
+			input:     "tickets:subject:why?",
+			wantBase:  "tickets",
+			wantQuery: "subject:why?",
+		},
+		{
+			name:      "question mark mid-query no equals after",
+			input:     "tickets:tag:billing? AND status:2",
+			wantBase:  "tickets",
+			wantQuery: "tag:billing? AND status:2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base, query := parseTableName(tt.input)
+			assert.Equal(t, tt.wantBase, base)
+			assert.Equal(t, tt.wantQuery, query)
+		})
+	}
+}
