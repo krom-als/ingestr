@@ -37,6 +37,7 @@ import (
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
 	csvsource "github.com/bruin-data/ingestr/pkg/source/csv"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"google.golang.org/api/iterator"
@@ -1516,6 +1517,8 @@ func buildAzureDatalakeFilesystemURL(accountName, fileSystem string) string {
 	return adlsutil.FilesystemURL(accountName, fileSystem)
 }
 
+var blobstoreParamKeys = []string{"format", "encoding"}
+
 func parseTableHints(s string) (FileFormat, string) {
 	formatHint := FormatUnknown
 	encoding := ""
@@ -1547,9 +1550,19 @@ func parseTableHints(s string) (FileFormat, string) {
 func parseSFTPTablePattern(table string) (bucket, pattern string, formatHint FileFormat, encoding string) {
 	formatHint = FormatUnknown
 
-	if idx := strings.Index(table, "#"); idx != -1 {
-		formatHint, encoding = parseTableHints(table[idx+1:])
-		table = table[:idx]
+	path, params, hasQuery, err := tablespec.Split(table)
+	if err == nil && hasQuery {
+		table = path
+		if tablespec.ValidateKeys(params, blobstoreParamKeys...) == nil {
+			formatHint, encoding = applyBlobstoreParams(params)
+		}
+	}
+
+	if !hasQuery {
+		if idx := strings.Index(table, "#"); idx != -1 {
+			formatHint, encoding = parseTableHints(table[idx+1:])
+			table = table[:idx]
+		}
 	}
 
 	if !strings.HasPrefix(table, "/") {
@@ -1563,9 +1576,19 @@ func parseSFTPTablePattern(table string) (bucket, pattern string, formatHint Fil
 func parseTablePattern(table string) (bucket, pattern string, formatHint FileFormat, encoding string) {
 	formatHint = FormatUnknown
 
-	if idx := strings.Index(table, "#"); idx != -1 {
-		formatHint, encoding = parseTableHints(table[idx+1:])
-		table = table[:idx]
+	path, params, hasQuery, err := tablespec.Split(table)
+	if err == nil && hasQuery {
+		table = path
+		if tablespec.ValidateKeys(params, blobstoreParamKeys...) == nil {
+			formatHint, encoding = applyBlobstoreParams(params)
+		}
+	}
+
+	if !hasQuery {
+		if idx := strings.Index(table, "#"); idx != -1 {
+			formatHint, encoding = parseTableHints(table[idx+1:])
+			table = table[:idx]
+		}
 	}
 
 	parts := strings.SplitN(table, "/", 2)
@@ -1573,6 +1596,24 @@ func parseTablePattern(table string) (bucket, pattern string, formatHint FileFor
 		return parts[0], "*", formatHint, encoding
 	}
 	return parts[0], parts[1], formatHint, encoding
+}
+
+func applyBlobstoreParams(params url.Values) (formatHint FileFormat, encoding string) {
+	formatHint = FormatUnknown
+	if v := strings.TrimSpace(params.Get("format")); v != "" {
+		switch strings.ToLower(v) {
+		case "csv":
+			formatHint = FormatCSV
+		case "jsonl", "ndjson":
+			formatHint = FormatJSONL
+		case "parquet":
+			formatHint = FormatParquet
+		}
+	}
+	if v := strings.TrimSpace(params.Get("encoding")); v != "" {
+		encoding = v
+	}
+	return formatHint, encoding
 }
 
 func extractPrefix(pattern string) string {

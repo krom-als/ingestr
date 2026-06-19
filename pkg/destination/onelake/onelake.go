@@ -23,6 +23,7 @@ import (
 	"github.com/bruin-data/ingestr/pkg/destination"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 	"github.com/google/uuid"
 )
 
@@ -162,19 +163,47 @@ func (d *OneLakeDestination) filesDir() string {
 	return d.itemPath() + "/Files/" + strings.Trim(d.relPath, "/")
 }
 
-// parseTarget splits a dest-table into a write mode and relative path. A leading
-// "Tables/" or "Files/" segment selects the mode; anything else defaults to a
-// Delta table.
-func parseTarget(table string) (writeMode, string) {
-	t := strings.Trim(table, "/")
+var onelakeParamKeys = []string{"area"}
+
+// parseTarget splits a dest-table into a write mode and relative path.
+//
+// Legacy: a leading "Tables/" or "Files/" prefix selects the mode; a bare name
+// defaults to Tables mode.
+//
+// Query form: "mydata?area=tables" or "mydata?area=files". If a prefix is also
+// present (e.g. "Tables/mydata?area=files"), the prefix wins and area is ignored.
+func parseTarget(table string) (writeMode, string, error) {
+	path, params, hasQuery, err := tablespec.Split(table)
+	if err != nil {
+		return modeTables, "", err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, onelakeParamKeys...); err != nil {
+			return modeTables, "", err
+		}
+	}
+
+	t := strings.Trim(path, "/")
 	switch {
 	case strings.HasPrefix(strings.ToLower(t), "tables/"):
-		return modeTables, t[len("tables/"):]
+		return modeTables, t[len("tables/"):], nil
 	case strings.HasPrefix(strings.ToLower(t), "files/"):
-		return modeFiles, t[len("files/"):]
-	default:
-		return modeTables, t
+		return modeFiles, t[len("files/"):], nil
 	}
+
+	if hasQuery {
+		switch strings.ToLower(params.Get("area")) {
+		case "files":
+			return modeFiles, t, nil
+		case "tables", "":
+			return modeTables, t, nil
+		default:
+			return modeTables, "", fmt.Errorf("unknown area %q: must be \"tables\" or \"files\"", params.Get("area"))
+		}
+	}
+
+	return modeTables, t, nil
 }
 
 func (d *OneLakeDestination) PrepareTable(ctx context.Context, opts destination.PrepareOptions) error {
@@ -186,7 +215,11 @@ func (d *OneLakeDestination) PrepareTable(ctx context.Context, opts destination.
 		d.arrowSchema = opts.Schema.ToArrowSchema()
 	}
 	d.dropFirst = opts.DropFirst
-	d.mode, d.relPath = parseTarget(opts.Table)
+	var parseErr error
+	d.mode, d.relPath, parseErr = parseTarget(opts.Table)
+	if parseErr != nil {
+		return parseErr
+	}
 
 	if d.relPath == "" {
 		return fmt.Errorf("dest-table is required for OneLake")
@@ -499,7 +532,10 @@ func (d *OneLakeDestination) SwapTable(ctx context.Context, opts destination.Swa
 // rejecting Files-mode targets (the copy-on-write strategies only apply to
 // Delta tables).
 func (d *OneLakeDestination) tableDirForTables(table, op string) (string, error) {
-	mode, rel := parseTarget(table)
+	mode, rel, err := parseTarget(table)
+	if err != nil {
+		return "", err
+	}
 	if mode != modeTables {
 		return "", fmt.Errorf("%s strategy requires a Tables/ destination, got %q", op, table)
 	}
@@ -719,7 +755,10 @@ func writeBatchesToParquet(batches []arrow.RecordBatch) ([]byte, *arrow.Schema, 
 }
 
 func (d *OneLakeDestination) DropTable(ctx context.Context, table string) error {
-	mode, relPath := parseTarget(table)
+	mode, relPath, err := parseTarget(table)
+	if err != nil {
+		return err
+	}
 	area := "Tables"
 	if mode == modeFiles {
 		area = "Files"

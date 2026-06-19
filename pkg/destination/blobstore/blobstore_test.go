@@ -287,6 +287,84 @@ func TestParseBucketAndPath(t *testing.T) {
 	}
 }
 
+func TestParseBucketAndPathWithParams(t *testing.T) {
+	tests := []struct {
+		name       string
+		table      string
+		wantBucket string
+		wantPath   string
+		wantLayout string
+		wantErr    bool
+		errContain string
+	}{
+		{
+			name:       "legacy bucket only",
+			table:      "my_bucket",
+			wantBucket: "my_bucket",
+			wantPath:   "",
+			wantLayout: "",
+		},
+		{
+			name:       "legacy bucket/path",
+			table:      "my_bucket/records",
+			wantBucket: "my_bucket",
+			wantPath:   "records",
+			wantLayout: "",
+		},
+		{
+			name:       "legacy deep path",
+			table:      "my_bucket/path/to/data",
+			wantBucket: "my_bucket",
+			wantPath:   "path/to/data",
+			wantLayout: "",
+		},
+		{
+			name:       "query layout param",
+			table:      "my_bucket/records?layout={table_name}.{ext}",
+			wantBucket: "my_bucket",
+			wantPath:   "records",
+			wantLayout: "{table_name}.{ext}",
+		},
+		{
+			name:       "query layout with load_id template",
+			table:      "my_bucket/data?layout={load_id}.{file_id}.{ext}",
+			wantBucket: "my_bucket",
+			wantPath:   "data",
+			wantLayout: "{load_id}.{file_id}.{ext}",
+		},
+		{
+			name:       "bucket only with layout param",
+			table:      "my_bucket?layout={table_name}.{ext}",
+			wantBucket: "my_bucket",
+			wantPath:   "",
+			wantLayout: "{table_name}.{ext}",
+		},
+		{
+			name:       "unknown param rejected",
+			table:      "my_bucket/records?layout={table_name}.{ext}&typo=x",
+			wantErr:    true,
+			errContain: "unknown table parameter",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bucket, path, layout, err := parseBucketAndPathWithParams(tt.table)
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errContain != "" {
+					assert.Contains(t, err.Error(), tt.errContain)
+				}
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantBucket, bucket)
+			assert.Equal(t, tt.wantPath, path)
+			assert.Equal(t, tt.wantLayout, layout)
+		})
+	}
+}
+
 func TestRenderLayout(t *testing.T) {
 	d := &BlobstoreDestination{
 		tableName: "my_bucket/records",

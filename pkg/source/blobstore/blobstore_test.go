@@ -688,6 +688,94 @@ func TestBuildS3InventoryQuery(t *testing.T) {
 	assert.Equal(t, `SELECT "key", "last_modified_date" FROM "inventory_db"."inventory_table" WHERE "bucket" = 'my-bucket' AND substr("key", 1, 5) = 'logs/' AND "last_modified_date" >= timestamp '2026-01-02 01:04:05' AND "last_modified_date" < timestamp '2026-01-03 04:05:06'`, query)
 }
 
+func TestParseTablePatternQueryForm(t *testing.T) {
+	tests := []struct {
+		name         string
+		table        string
+		wantBucket   string
+		wantPattern  string
+		wantFormat   FileFormat
+		wantEncoding string
+	}{
+		{"format csv", "my-bucket/data/**/*.csv?format=csv", "my-bucket", "data/**/*.csv", FormatCSV, ""},
+		{"format jsonl", "bucket/logs?format=jsonl", "bucket", "logs", FormatJSONL, ""},
+		{"format ndjson alias", "bucket/data?format=ndjson", "bucket", "data", FormatJSONL, ""},
+		{"format parquet", "bucket/file?format=parquet", "bucket", "file", FormatParquet, ""},
+		{"encoding only", "bucket/file.csv?encoding=utf-8", "bucket", "file.csv", FormatUnknown, "utf-8"},
+		{"format and encoding", "bucket/data/**/*.csv?format=csv&encoding=windows-1252", "bucket", "data/**/*.csv", FormatCSV, "windows-1252"},
+		{"encoding and format reversed", "bucket/data?encoding=cp1252&format=jsonl", "bucket", "data", FormatJSONL, "cp1252"},
+		{"unknown format silently ignored", "bucket/file?format=xml", "bucket", "file", FormatUnknown, ""},
+		{"bucket only with format", "bucket?format=parquet", "bucket", "*", FormatParquet, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bucket, pattern, format, encoding := parseTablePattern(tt.table)
+			assert.Equal(t, tt.wantBucket, bucket, "bucket")
+			assert.Equal(t, tt.wantPattern, pattern, "pattern")
+			assert.Equal(t, tt.wantFormat, format, "format")
+			assert.Equal(t, tt.wantEncoding, encoding, "encoding")
+		})
+	}
+}
+
+func TestParseTablePatternGlobWildcardPreserved(t *testing.T) {
+	// A "?" used as a glob wildcard must NOT be treated as a query delimiter.
+	// tablespec.Split guards against this: the suffix after "?" must look like
+	// a param block (contain "=" and only identifier tokens).
+	tests := []struct {
+		name         string
+		table        string
+		wantBucket   string
+		wantPattern  string
+		wantFormat   FileFormat
+		wantEncoding string
+	}{
+		{"question mark glob in pattern", "bucket/q?.csv", "bucket", "q?.csv", FormatUnknown, ""},
+		{"question mark glob extensionless", "bucket/data/q?", "bucket", "data/q?", FormatUnknown, ""},
+		{"question mark glob with hint", "bucket/q?.csv#csv", "bucket", "q?.csv", FormatCSV, ""},
+		{"question mark glob with query params", "bucket/q?.csv?format=csv", "bucket", "q?.csv", FormatCSV, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bucket, pattern, format, encoding := parseTablePattern(tt.table)
+			assert.Equal(t, tt.wantBucket, bucket, "bucket")
+			assert.Equal(t, tt.wantPattern, pattern, "pattern")
+			assert.Equal(t, tt.wantFormat, format, "format")
+			assert.Equal(t, tt.wantEncoding, encoding, "encoding")
+		})
+	}
+}
+
+func TestParseSFTPTablePatternQueryForm(t *testing.T) {
+	tests := []struct {
+		name         string
+		table        string
+		wantPattern  string
+		wantFormat   FileFormat
+		wantEncoding string
+	}{
+		{"format csv", "/exports/data.dat?format=csv", "exports/data.dat", FormatCSV, ""},
+		{"format jsonl", "logs/events?format=jsonl", "logs/events", FormatJSONL, ""},
+		{"format ndjson alias", "logs/events?format=ndjson", "logs/events", FormatJSONL, ""},
+		{"format parquet", "/data/file?format=parquet", "data/file", FormatParquet, ""},
+		{"encoding only", "/exports/data.csv?encoding=windows-1252", "exports/data.csv", FormatUnknown, "windows-1252"},
+		{"format and encoding", "/exports/data.dat?format=csv&encoding=cp1252", "exports/data.dat", FormatCSV, "cp1252"},
+		{"unknown format silently ignored", "/exports/data?format=xml", "exports/data", FormatUnknown, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bucket, pattern, format, encoding := parseSFTPTablePattern(tt.table)
+			assert.Equal(t, "", bucket, "SFTP bucket should always be empty")
+			assert.Equal(t, tt.wantPattern, pattern, "pattern")
+			assert.Equal(t, tt.wantFormat, format, "format")
+			assert.Equal(t, tt.wantEncoding, encoding, "encoding")
+		})
+	}
+}
+
 func TestBuildS3InventoryQueryWithoutModifiedIncrementality(t *testing.T) {
 	start := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
 	parsed := &parsedBlobstoreURI{

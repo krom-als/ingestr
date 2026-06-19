@@ -30,6 +30,7 @@ import (
 	"github.com/bruin-data/ingestr/pkg/destination"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 	"github.com/google/uuid"
 	"google.golang.org/api/option"
 )
@@ -242,16 +243,24 @@ func (d *BlobstoreDestination) Close(ctx context.Context) error {
 	return nil
 }
 
+var blobstoreDestParamKeys = []string{"layout"}
+
 func (d *BlobstoreDestination) PrepareTable(ctx context.Context, opts destination.PrepareOptions) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	d.schema = opts.Schema
 
-	bucketName, basePath := parseBucketAndPath(opts.Table)
+	bucketName, basePath, layout, err := parseBucketAndPathWithParams(opts.Table)
+	if err != nil {
+		return fmt.Errorf("invalid dest-table %q: %w", opts.Table, err)
+	}
 	d.bucketName = bucketName
 	d.basePath = basePath
 	d.tableName = opts.Table
+	if layout != "" {
+		d.layout = layout
+	}
 
 	if opts.Schema != nil {
 		d.arrowSchema = opts.Schema.ToArrowSchema()
@@ -259,6 +268,21 @@ func (d *BlobstoreDestination) PrepareTable(ctx context.Context, opts destinatio
 
 	config.Debug("[BLOBSTORE] Prepared table: bucket=%s, basePath=%s", d.bucketName, d.basePath)
 	return nil
+}
+
+func parseBucketAndPathWithParams(table string) (bucket, path, layout string, err error) {
+	base, params, hasQuery, splitErr := tablespec.Split(table)
+	if splitErr != nil {
+		return "", "", "", splitErr
+	}
+	if hasQuery {
+		if validateErr := tablespec.ValidateKeys(params, blobstoreDestParamKeys...); validateErr != nil {
+			return "", "", "", validateErr
+		}
+		layout = params.Get("layout")
+	}
+	b, p := parseBucketAndPath(base)
+	return b, p, layout, nil
 }
 
 func parseBucketAndPath(table string) (bucket, path string) {

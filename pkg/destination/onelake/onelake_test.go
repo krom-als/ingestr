@@ -89,7 +89,43 @@ func TestParseTarget(t *testing.T) {
 		{"/Tables/users/", modeTables, "users"},
 	}
 	for _, c := range cases {
-		mode, path := parseTarget(c.table)
+		mode, path, err := parseTarget(c.table)
+		require.NoError(t, err, c.table)
+		assert.Equal(t, c.wantMode, mode, c.table)
+		assert.Equal(t, c.wantPath, path, c.table)
+	}
+}
+
+func TestParseTargetQueryForm(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		table    string
+		wantMode writeMode
+		wantPath string
+		wantErr  bool
+	}{
+		{"mydata?area=tables", modeTables, "mydata", false},
+		{"mydata?area=files", modeFiles, "mydata", false},
+		{"MYDATA?area=FILES", modeFiles, "MYDATA", false},
+		{"sub/path?area=files", modeFiles, "sub/path", false},
+		{"mydata?area=tables", modeTables, "mydata", false},
+		// Prefix wins when combined with area.
+		{"Tables/mydata?area=files", modeTables, "mydata", false},
+		{"Files/mydata?area=tables", modeFiles, "mydata", false},
+		// Unknown area value.
+		{"mydata?area=delta", modeTables, "", true},
+		// Unknown param key.
+		{"mydata?layout=foo", modeTables, "", true},
+	}
+
+	for _, c := range cases {
+		mode, path, err := parseTarget(c.table)
+		if c.wantErr {
+			assert.Error(t, err, c.table)
+			continue
+		}
+		require.NoError(t, err, c.table)
 		assert.Equal(t, c.wantMode, mode, c.table)
 		assert.Equal(t, c.wantPath, path, c.table)
 	}
