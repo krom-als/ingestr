@@ -133,6 +133,114 @@ func TestParseTableName(t *testing.T) {
 	}
 }
 
+func TestParseAppLovinMaxSpec_QueryForm(t *testing.T) {
+	tests := []struct {
+		name      string
+		table     string
+		wantTable string
+		wantApps  []string
+		wantError bool
+	}{
+		{
+			name:      "single app_ids",
+			table:     "user_ad_revenue?app_ids=com.example.app1",
+			wantTable: "user_ad_revenue",
+			wantApps:  []string{"com.example.app1"},
+		},
+		{
+			name:      "repeated app_ids keys",
+			table:     "user_ad_revenue?app_ids=com.example.app1&app_ids=com.example.app2",
+			wantTable: "user_ad_revenue",
+			wantApps:  []string{"com.example.app1", "com.example.app2"},
+		},
+		{
+			name:      "comma-joined single key",
+			table:     "user_ad_revenue?app_ids=com.example.app1,com.example.app2",
+			wantTable: "user_ad_revenue",
+			wantApps:  []string{"com.example.app1", "com.example.app2"},
+		},
+		{
+			name:      "missing app_ids",
+			table:     "user_ad_revenue?app_ids=",
+			wantError: true,
+		},
+		{
+			name:      "unknown param",
+			table:     "user_ad_revenue?app_ids=com.example.app&other=x",
+			wantError: true,
+		},
+		{
+			name:      "duplicate app_ids in query form",
+			table:     "user_ad_revenue?app_ids=com.example.app1&app_ids=com.example.app1",
+			wantError: true,
+		},
+		{
+			name:      "unsupported table in query form",
+			table:     "invalid_table?app_ids=com.example.app1",
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tableName, apps, err := parseAppLovinMaxSpec(tt.table)
+			if tt.wantError {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantTable, tableName)
+				assert.Equal(t, tt.wantApps, apps)
+			}
+		})
+	}
+}
+
+func TestParseAppLovinMaxSpec_LegacyForm(t *testing.T) {
+	tests := []struct {
+		name      string
+		table     string
+		wantTable string
+		wantApps  []string
+		wantError bool
+	}{
+		{
+			name:      "single app",
+			table:     "user_ad_revenue:com.example.app1",
+			wantTable: "user_ad_revenue",
+			wantApps:  []string{"com.example.app1"},
+		},
+		{
+			name:      "multiple apps",
+			table:     "user_ad_revenue:com.example.app1,com.example.app2",
+			wantTable: "user_ad_revenue",
+			wantApps:  []string{"com.example.app1", "com.example.app2"},
+		},
+		{
+			name:      "missing colon",
+			table:     "user_ad_revenue",
+			wantError: true,
+		},
+		{
+			name:      "empty app list",
+			table:     "user_ad_revenue:",
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tableName, apps, err := parseAppLovinMaxSpec(tt.table)
+			if tt.wantError {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantTable, tableName)
+				assert.Equal(t, tt.wantApps, apps)
+			}
+		})
+	}
+}
+
 func TestIsValidTable(t *testing.T) {
 	assert.True(t, isValidTable("user_ad_revenue"))
 	assert.False(t, isValidTable("invalid"))

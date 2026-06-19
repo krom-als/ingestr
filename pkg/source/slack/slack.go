@@ -15,6 +15,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -106,24 +107,92 @@ func (s *SlackSource) HandlesIncrementality() bool {
 	return true
 }
 
-func (s *SlackSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
-	tableName := req.Name
+var slackParamKeys = []string{"channel_ids"}
 
-	meta, ok := supportedTables[tableName]
-	if !ok {
-		if strings.HasPrefix(tableName, "messages:") {
-			meta = messagesMeta
-		} else {
+type slackReadSpec struct {
+	table      string
+	channelIDs []string
+	rawName    string // original req.Name, for TableName
+}
+
+// parseSlackTableSpec parses a source-table string in either form:
+//
+//	messages?channel_ids=C012AB3CD&channel_ids=general   (URL-style; preferred)
+//	messages:C012AB3CD,general                            (legacy colon form)
+//
+// channel_ids is only valid for the messages table; other tables reject it.
+func parseSlackTableSpec(name string) (slackReadSpec, error) {
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return slackReadSpec{}, err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, slackParamKeys...); err != nil {
+			return slackReadSpec{}, err
+		}
+		spec := slackReadSpec{table: strings.TrimSpace(path), rawName: name}
+		for _, v := range params["channel_ids"] {
+			spec.channelIDs = append(spec.channelIDs, splitChannelIDs(v)...)
+		}
+		if len(spec.channelIDs) > 0 && spec.table != "messages" {
+			return slackReadSpec{}, fmt.Errorf("%s table does not accept a channel_ids parameter", spec.table)
+		}
+		if spec.table == "messages" && len(spec.channelIDs) == 0 {
+			return slackReadSpec{}, fmt.Errorf("messages table requires at least one channel_ids value")
+		}
+		return spec, nil
+	}
+
+	// Legacy colon form, preserved exactly.
+	if strings.HasPrefix(name, "messages:") {
+		ids := strings.Split(strings.TrimPrefix(name, "messages:"), ",")
+		return slackReadSpec{table: "messages", channelIDs: ids, rawName: name}, nil
+	}
+	return slackReadSpec{table: name, rawName: name}, nil
+}
+
+// splitChannelIDs splits a comma-separated channel id/name segment into trimmed, non-empty entries.
+func splitChannelIDs(v string) []string {
+	var ids []string
+	for _, id := range strings.Split(v, ",") {
+		if t := strings.TrimSpace(id); t != "" {
+			ids = append(ids, t)
+		}
+	}
+	return ids
+}
+
+func (s *SlackSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
+	spec, err := parseSlackTableSpec(req.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	var meta tableMeta
+	if spec.table == "messages" {
+		if len(spec.channelIDs) == 0 {
 			tables := make([]string, 0, len(supportedTables))
 			for t := range supportedTables {
 				tables = append(tables, t)
 			}
-			return nil, fmt.Errorf("unsupported table: %s (supported: %v, messages:<channel_id,...>)", tableName, tables)
+			return nil, fmt.Errorf("unsupported table: %s (supported: %v, messages:<channel_id,...>)", req.Name, tables)
+		}
+		meta = messagesMeta
+	} else {
+		var ok bool
+		meta, ok = supportedTables[spec.table]
+		if !ok {
+			tables := make([]string, 0, len(supportedTables))
+			for t := range supportedTables {
+				tables = append(tables, t)
+			}
+			return nil, fmt.Errorf("unsupported table: %s (supported: %v, messages:<channel_id,...>)", req.Name, tables)
 		}
 	}
 
 	return &source.DynamicSourceTable{
-		TableName:           tableName,
+		TableName:           spec.rawName,
 		TablePrimaryKeys:    meta.primaryKeys,
 		TableIncrementalKey: "",
 		TableStrategy:       meta.strategy,
@@ -132,30 +201,29 @@ func (s *SlackSource) GetTable(ctx context.Context, req source.TableRequest) (so
 			return nil, fmt.Errorf("slack source does not have a predefined schema; schema inference is required")
 		},
 		ReadFn: func(ctx context.Context, opts source.ReadOptions) (<-chan source.RecordBatchResult, error) {
-			return s.read(ctx, tableName, opts)
+			return s.readSpec(ctx, spec, opts)
 		},
 	}, nil
 }
 
-func (s *SlackSource) read(ctx context.Context, table string, opts source.ReadOptions) (<-chan source.RecordBatchResult, error) {
+func (s *SlackSource) readSpec(ctx context.Context, spec slackReadSpec, opts source.ReadOptions) (<-chan source.RecordBatchResult, error) {
 	results := make(chan source.RecordBatchResult, 8)
 
 	go func() {
 		defer close(results)
 
 		var err error
-		switch {
-		case table == "channels":
+		switch spec.table {
+		case "channels":
 			err = s.readChannels(ctx, opts, results)
-		case table == "users":
+		case "users":
 			err = s.readUsers(ctx, opts, results)
-		case table == "access_logs":
+		case "access_logs":
 			err = s.readAccessLogs(ctx, opts, results)
-		case strings.HasPrefix(table, "messages:"):
-			channels := strings.Split(strings.TrimPrefix(table, "messages:"), ",")
-			err = s.readMessages(ctx, opts, channels, results)
+		case "messages":
+			err = s.readMessages(ctx, opts, spec.channelIDs, results)
 		default:
-			err = fmt.Errorf("unsupported table: %s", table)
+			err = fmt.Errorf("unsupported table: %s", spec.table)
 		}
 
 		if err != nil {

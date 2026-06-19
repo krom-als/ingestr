@@ -18,6 +18,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -145,8 +146,61 @@ func isValidTable(name string) bool {
 	return false
 }
 
+var applovinmaxParamKeys = []string{"app_ids"}
+
+// parseAppLovinMaxSpec parses the source-table string in either form:
+//
+//	user_ad_revenue?app_ids=com.example.app1&app_ids=com.example.app2  (URL-style)
+//	user_ad_revenue:<app_id1>[,<app_id2>...]                            (legacy colon form)
+//
+// app_ids is required in both forms.
+func parseAppLovinMaxSpec(name string) (string, []string, error) {
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return "", nil, err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, applovinmaxParamKeys...); err != nil {
+			return "", nil, err
+		}
+		tableName := strings.TrimSpace(path)
+		if !isValidTable(tableName) {
+			return "", nil, fmt.Errorf("unsupported table: %s (supported: %s)", tableName, strings.Join(supportedTables, ", "))
+		}
+		var apps []string
+		for _, v := range params["app_ids"] {
+			apps = append(apps, splitAppIDs(v)...)
+		}
+		if len(apps) == 0 {
+			return "", nil, fmt.Errorf("at least one application id is required")
+		}
+		seen := make(map[string]bool, len(apps))
+		for _, a := range apps {
+			if seen[a] {
+				return "", nil, fmt.Errorf("duplicate application id: %s", a)
+			}
+			seen[a] = true
+		}
+		return tableName, apps, nil
+	}
+
+	return parseTableName(name)
+}
+
+// splitAppIDs splits a comma-separated app id segment into trimmed, non-empty ids.
+func splitAppIDs(v string) []string {
+	var ids []string
+	for _, id := range strings.Split(v, ",") {
+		if t := strings.TrimSpace(id); t != "" {
+			ids = append(ids, t)
+		}
+	}
+	return ids
+}
+
 func (s *AppLovinMaxSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
-	tableName, apps, err := parseTableName(req.Name)
+	tableName, apps, err := parseAppLovinMaxSpec(req.Name)
 	if err != nil {
 		return nil, err
 	}

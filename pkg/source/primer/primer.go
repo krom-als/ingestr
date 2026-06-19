@@ -15,6 +15,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -165,7 +166,38 @@ func validStatusList() string {
 	return strings.Join(allStatuses(), ", ")
 }
 
+// primerParamKeys lists the query parameters accepted in the URL-style table form.
+var primerParamKeys = []string{"statuses"}
+
 func parseTableName(table string) (string, []string, error) {
+	path, params, hasQuery, err := tablespec.Split(table)
+	if err != nil {
+		return "", nil, err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, primerParamKeys...); err != nil {
+			return "", nil, err
+		}
+		tableName := strings.TrimSpace(path)
+		var rawVals []string
+		for _, v := range params["statuses"] {
+			rawVals = append(rawVals, splitStatuses(v)...)
+		}
+		if tableName != "payments" && len(rawVals) > 0 {
+			return "", nil, fmt.Errorf("statuses parameter is only valid for the payments table")
+		}
+		if len(rawVals) == 0 {
+			return tableName, allStatuses(), nil
+		}
+		statuses, err := parseStatusList(rawVals)
+		if err != nil {
+			return "", nil, err
+		}
+		return tableName, statuses, nil
+	}
+
+	// Legacy colon form, preserved exactly.
 	parts := strings.SplitN(table, ":", 2)
 	if len(parts) == 1 {
 		return table, allStatuses(), nil
@@ -189,6 +221,39 @@ func parseTableName(table string) (string, []string, error) {
 		return "", nil, fmt.Errorf("no payment status provided, use 'payments' for all statuses or 'payments:<status>' to filter, valid statuses are: %s", validStatusList())
 	}
 	return parts[0], statuses, nil
+}
+
+// splitStatuses splits a comma-joined status segment into trimmed, non-empty values.
+func splitStatuses(v string) []string {
+	var out []string
+	for _, s := range strings.Split(v, ",") {
+		if t := strings.TrimSpace(s); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// parseStatusList validates and de-duplicates a slice of raw status strings
+// (already split from query params). Returns (statuses, nil) or ("", "", err).
+func parseStatusList(raw []string) ([]string, error) {
+	seen := make(map[string]bool, len(raw))
+	var statuses []string
+	for _, s := range raw {
+		s = strings.ToUpper(s)
+		if seen[s] {
+			continue
+		}
+		if !validStatuses[s] {
+			return nil, fmt.Errorf("invalid payment status %q, valid statuses are: %s", s, validStatusList())
+		}
+		seen[s] = true
+		statuses = append(statuses, s)
+	}
+	if len(statuses) == 0 {
+		return nil, fmt.Errorf("no payment status provided, use 'payments' for all statuses or 'payments:<status>' to filter, valid statuses are: %s", validStatusList())
+	}
+	return statuses, nil
 }
 
 func (s *PrimerSource) readPayments(ctx context.Context, statuses []string, opts source.ReadOptions, results chan<- source.RecordBatchResult) error {

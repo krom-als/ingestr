@@ -21,6 +21,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -260,14 +261,65 @@ func (s *AppStoreSource) HandlesIncrementality() bool {
 	return true
 }
 
-func (s *AppStoreSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
-	tableName := req.Name
-	appIDs := s.appIDs
+var appstoreParamKeys = []string{"app_ids"}
 
-	if strings.Contains(tableName, ":") {
-		parts := strings.SplitN(tableName, ":", 2)
-		tableName = parts[0]
-		appIDs = strings.Split(parts[1], ",")
+type appStoreSpec struct {
+	table  string
+	appIDs []string
+}
+
+// parseAppStoreSpec parses a source-table string in either form:
+//
+//	app-downloads-detailed?app_ids=1234567890&app_ids=9876543210   (URL-style)
+//	app-downloads-detailed:1234567890,9876543210                    (legacy colon form)
+func parseAppStoreSpec(name string) (appStoreSpec, error) {
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return appStoreSpec{}, err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, appstoreParamKeys...); err != nil {
+			return appStoreSpec{}, err
+		}
+		spec := appStoreSpec{table: strings.TrimSpace(path)}
+		for _, v := range params["app_ids"] {
+			spec.appIDs = append(spec.appIDs, splitAppIDs(v)...)
+		}
+		return spec, nil
+	}
+
+	// Legacy colon form, preserved exactly.
+	spec := appStoreSpec{table: name}
+	if strings.Contains(name, ":") {
+		parts := strings.SplitN(name, ":", 2)
+		spec.table = parts[0]
+		spec.appIDs = strings.Split(parts[1], ",")
+	}
+	return spec, nil
+}
+
+// splitAppIDs splits a comma-separated id segment into trimmed, non-empty ids.
+func splitAppIDs(v string) []string {
+	var ids []string
+	for _, id := range strings.Split(v, ",") {
+		if t := strings.TrimSpace(id); t != "" {
+			ids = append(ids, t)
+		}
+	}
+	return ids
+}
+
+func (s *AppStoreSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
+	spec, err := parseAppStoreSpec(req.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	tableName := spec.table
+	appIDs := s.appIDs
+	if len(spec.appIDs) > 0 {
+		appIDs = spec.appIDs
 	}
 
 	res, ok := resMeta[tableName]
