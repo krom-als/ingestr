@@ -1,6 +1,7 @@
 package isoc_pulse
 
 import (
+	"net/url"
 	"testing"
 )
 
@@ -188,6 +189,315 @@ func TestValidateOptions(t *testing.T) {
 			err := validateOptions(tt.metric, tt.opts)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateOptions(%q, %v) error = %v, wantErr %v", tt.metric, tt.opts, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseTableNameQueryForm(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantMetric string
+		wantOpts   []string
+		wantErr    bool
+	}{
+		{
+			name:       "net_loss with shutdown_type and country",
+			input:      "net_loss?shutdown_type=shutdown&country=US",
+			wantMetric: "net_loss",
+			wantOpts:   []string{"shutdown", "US"},
+		},
+		{
+			name:       "https with topsites and country",
+			input:      "https?topsites=true&country=DE",
+			wantMetric: "https",
+			wantOpts:   []string{"topsites", "DE"},
+		},
+		{
+			name:       "https with country only",
+			input:      "https?country=US",
+			wantMetric: "https",
+			wantOpts:   []string{"US"},
+		},
+		{
+			name:       "https with topsites only",
+			input:      "https?topsites=true",
+			wantMetric: "https",
+			wantOpts:   []string{"topsites"},
+		},
+		{
+			name:       "https no params",
+			input:      "https?topsites=false",
+			wantMetric: "https",
+			wantOpts:   nil,
+		},
+		{
+			name:       "ipv6 with country",
+			input:      "ipv6?country=FR",
+			wantMetric: "ipv6",
+			wantOpts:   []string{"FR"},
+		},
+		{
+			name:       "ipv6 with topsites and country",
+			input:      "ipv6?topsites=true&country=JP",
+			wantMetric: "ipv6",
+			wantOpts:   []string{"topsites", "JP"},
+		},
+		{
+			name:       "roa with ip_version and country",
+			input:      "roa?ip_version=4&country=US",
+			wantMetric: "roa",
+			wantOpts:   []string{"4", "US"},
+		},
+		{
+			name:       "roa with ip_version only",
+			input:      "roa?ip_version=6",
+			wantMetric: "roa",
+			wantOpts:   []string{"6"},
+		},
+		{
+			name:       "dnssec_validation with country",
+			input:      "dnssec_validation?country=SE",
+			wantMetric: "dnssec_validation",
+			wantOpts:   []string{"SE"},
+		},
+		{
+			name:       "dnssec_adoption with country",
+			input:      "dnssec_adoption?country=BR",
+			wantMetric: "dnssec_adoption",
+			wantOpts:   []string{"BR"},
+		},
+		{
+			name:       "resilience with country",
+			input:      "resilience?country=IN",
+			wantMetric: "resilience",
+			wantOpts:   []string{"IN"},
+		},
+		{
+			name:       "http no params (no-option metric)",
+			input:      "http",
+			wantMetric: "http",
+			wantOpts:   nil,
+		},
+		{
+			name:    "unknown param key",
+			input:   "https?region=US",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			metric, opts, err := parseTableName(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseTableName() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+			if metric != tt.wantMetric {
+				t.Errorf("parseTableName() metric = %q, want %q", metric, tt.wantMetric)
+			}
+			if len(opts) != len(tt.wantOpts) {
+				t.Errorf("parseTableName() opts = %v, want %v", opts, tt.wantOpts)
+				return
+			}
+			for i := range opts {
+				if opts[i] != tt.wantOpts[i] {
+					t.Errorf("parseTableName() opts[%d] = %q, want %q", i, opts[i], tt.wantOpts[i])
+				}
+			}
+		})
+	}
+}
+
+func TestBuildOptsFromParams(t *testing.T) {
+	makeParams := func(kv ...string) url.Values {
+		v := url.Values{}
+		for i := 0; i+1 < len(kv); i += 2 {
+			v.Set(kv[i], kv[i+1])
+		}
+		return v
+	}
+
+	tests := []struct {
+		name     string
+		metric   string
+		params   url.Values
+		wantOpts []string
+		wantErr  bool
+	}{
+		{
+			name:     "net_loss shutdown and country",
+			metric:   "net_loss",
+			params:   makeParams("shutdown_type", "shutdown", "country", "IN"),
+			wantOpts: []string{"shutdown", "IN"},
+		},
+		{
+			name:     "net_loss blackout and country",
+			metric:   "net_loss",
+			params:   makeParams("shutdown_type", "blackout", "country", "RU"),
+			wantOpts: []string{"blackout", "RU"},
+		},
+		{
+			name:     "roa ip_version and country",
+			metric:   "roa",
+			params:   makeParams("ip_version", "6", "country", "BR"),
+			wantOpts: []string{"6", "BR"},
+		},
+		{
+			name:     "roa ip_version only",
+			metric:   "roa",
+			params:   makeParams("ip_version", "4"),
+			wantOpts: []string{"4"},
+		},
+		{
+			name:     "https topsites and country",
+			metric:   "https",
+			params:   makeParams("topsites", "true", "country", "US"),
+			wantOpts: []string{"topsites", "US"},
+		},
+		{
+			name:     "https country only",
+			metric:   "https",
+			params:   makeParams("country", "US"),
+			wantOpts: []string{"US"},
+		},
+		{
+			name:     "https topsites false no country",
+			metric:   "https",
+			params:   makeParams("topsites", "false"),
+			wantOpts: nil,
+		},
+		{
+			name:     "ipv6 topsites and country",
+			metric:   "ipv6",
+			params:   makeParams("topsites", "true", "country", "DE"),
+			wantOpts: []string{"topsites", "DE"},
+		},
+		{
+			name:     "dnssec_validation country",
+			metric:   "dnssec_validation",
+			params:   makeParams("country", "SE"),
+			wantOpts: []string{"SE"},
+		},
+		{
+			name:     "resilience country",
+			metric:   "resilience",
+			params:   makeParams("country", "CN"),
+			wantOpts: []string{"CN"},
+		},
+		{
+			name:     "no-option metric no params",
+			metric:   "http",
+			params:   url.Values{},
+			wantOpts: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts, err := buildOptsFromParams(tt.metric, tt.params)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("buildOptsFromParams() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+			if len(opts) != len(tt.wantOpts) {
+				t.Errorf("buildOptsFromParams() = %v, want %v", opts, tt.wantOpts)
+				return
+			}
+			for i := range opts {
+				if opts[i] != tt.wantOpts[i] {
+					t.Errorf("buildOptsFromParams()[%d] = %q, want %q", i, opts[i], tt.wantOpts[i])
+				}
+			}
+		})
+	}
+}
+
+func TestQueryFormEquivalence(t *testing.T) {
+	tests := []struct {
+		name   string
+		legacy string
+		query  string
+	}{
+		{
+			name:   "net_loss shutdown US",
+			legacy: "net_loss:shutdown:US",
+			query:  "net_loss?shutdown_type=shutdown&country=US",
+		},
+		{
+			name:   "https topsites DE",
+			legacy: "https:topsites:DE",
+			query:  "https?topsites=true&country=DE",
+		},
+		{
+			name:   "https country only",
+			legacy: "https:US",
+			query:  "https?country=US",
+		},
+		{
+			name:   "roa ip_version and country",
+			legacy: "roa:6:BR",
+			query:  "roa?ip_version=6&country=BR",
+		},
+		{
+			name:   "roa ip_version only",
+			legacy: "roa:4",
+			query:  "roa?ip_version=4",
+		},
+		{
+			name:   "dnssec_validation country",
+			legacy: "dnssec_validation:SE",
+			query:  "dnssec_validation?country=SE",
+		},
+		{
+			name:   "ipv6 country",
+			legacy: "ipv6:DE",
+			query:  "ipv6?country=DE",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lMetric, lOpts, err := parseTableName(tt.legacy)
+			if err != nil {
+				t.Fatalf("legacy parseTableName(%q) error: %v", tt.legacy, err)
+			}
+			qMetric, qOpts, err := parseTableName(tt.query)
+			if err != nil {
+				t.Fatalf("query parseTableName(%q) error: %v", tt.query, err)
+			}
+
+			if lMetric != qMetric {
+				t.Errorf("metric mismatch: legacy=%q query=%q", lMetric, qMetric)
+			}
+
+			lCfg := buildMetricConfig(lMetric, lOpts, nil)
+			qCfg := buildMetricConfig(qMetric, qOpts, nil)
+
+			if lCfg.path != qCfg.path {
+				t.Errorf("path mismatch: legacy=%q query=%q", lCfg.path, qCfg.path)
+			}
+			for k, lv := range lCfg.params {
+				qv, ok := qCfg.params[k]
+				if !ok {
+					t.Errorf("query config missing param %q (value=%q)", k, lv)
+					continue
+				}
+				if lv != qv {
+					t.Errorf("param %q: legacy=%q query=%q", k, lv, qv)
+				}
+			}
+			for k := range qCfg.params {
+				if _, ok := lCfg.params[k]; !ok {
+					t.Errorf("query config has extra param %q", k)
+				}
 			}
 		})
 	}

@@ -17,6 +17,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 	"github.com/golang-jwt/jwt/v5"
 	"resty.dev/v3"
 )
@@ -278,7 +279,43 @@ type reportTableConfig struct {
 	groupBy     []string
 }
 
+// appleAdsParamKeys are the query parameters accepted by the URL-style table form.
+var appleAdsParamKeys = []string{"granularity", "group_by"}
+
+// parseReportTableName parses a report table string in either form:
+//
+//	campaign_reports?granularity=daily&group_by=countryOrRegion&group_by=gender  (URL-style; preferred)
+//	campaign_reports:daily:countryOrRegion,gender                                 (legacy colon form)
 func parseReportTableName(raw string) (reportTableConfig, error) {
+	path, params, hasQuery, err := tablespec.Split(raw)
+	if err != nil {
+		return reportTableConfig{}, err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, appleAdsParamKeys...); err != nil {
+			return reportTableConfig{}, err
+		}
+		cfg := reportTableConfig{baseTable: strings.TrimSpace(path)}
+		if g := params.Get("granularity"); g != "" {
+			mapped, ok := validGranularities[strings.ToLower(g)]
+			if !ok {
+				return cfg, fmt.Errorf("invalid granularity %q (supported: hourly, daily, weekly, monthly)", g)
+			}
+			cfg.granularity = mapped
+		}
+		for _, v := range params["group_by"] {
+			cfg.groupBy = append(cfg.groupBy, splitGroupBy(v)...)
+		}
+		for _, field := range cfg.groupBy {
+			if !validGroupByFields[field] {
+				return cfg, fmt.Errorf("invalid groupBy field %q (supported: countryOrRegion, ageRange, gender, deviceClass, adminArea, locality, countryCode)", field)
+			}
+		}
+		return cfg, nil
+	}
+
+	// Legacy colon form, preserved exactly.
 	parts := strings.SplitN(raw, ":", 3)
 	cfg := reportTableConfig{baseTable: parts[0]}
 
@@ -306,11 +343,26 @@ func parseReportTableName(raw string) (reportTableConfig, error) {
 	return cfg, nil
 }
 
+// splitGroupBy splits a comma-joined group_by value into trimmed, non-empty field names.
+func splitGroupBy(v string) []string {
+	var fields []string
+	for _, f := range strings.Split(v, ",") {
+		if t := strings.TrimSpace(f); t != "" {
+			fields = append(fields, t)
+		}
+	}
+	return fields
+}
+
 func (s *AppleAdsSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
 	tableName := req.Name
 	var rc reportTableConfig
 
+	// Strip colon-params (legacy) and query-params (new form) to get the bare table name.
 	baseTable := strings.SplitN(tableName, ":", 2)[0]
+	if i := strings.IndexByte(baseTable, '?'); i >= 0 {
+		baseTable = baseTable[:i]
+	}
 	if !isValidTable(baseTable) {
 		return nil, fmt.Errorf("unsupported table: %s (supported: %s)", tableName, strings.Join(supportedTables, ", "))
 	}

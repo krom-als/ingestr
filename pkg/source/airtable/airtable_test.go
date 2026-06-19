@@ -151,6 +151,78 @@ func TestParseTableName(t *testing.T) {
 	}
 }
 
+func TestParseTableNameQueryForm(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		defaultBaseID string
+		wantBase      string
+		wantTable     string
+		wantErr       bool
+	}{
+		{
+			name:      "query form: table with base_id param",
+			input:     "tblYYYY?base_id=appXXXXXXXXXXXXXX",
+			wantBase:  "appXXXXXXXXXXXXXX",
+			wantTable: "tblYYYY",
+		},
+		{
+			name:          "query form: base_id param overrides URI default",
+			input:         "tblYYYY?base_id=appFromTable",
+			defaultBaseID: "appFromURI",
+			wantBase:      "appFromTable",
+			wantTable:     "tblYYYY",
+		},
+		{
+			name:          "query form: falls back to URI default when param absent",
+			input:         "tblYYYY?base_id=",
+			defaultBaseID: "appFromURI",
+			wantBase:      "appFromURI",
+			wantTable:     "tblYYYY",
+		},
+		{
+			name:    "query form: no base_id in param and no URI default",
+			input:   "tblYYYY?base_id=",
+			wantErr: true,
+		},
+		{
+			name:    "query form: empty table path",
+			input:   "?base_id=appXXXX",
+			wantErr: true,
+		},
+		{
+			name:    "query form: unknown param key rejected",
+			input:   "tblYYYY?base_id=appXXXX&typo=oops",
+			wantErr: true,
+		},
+		{
+			name:      "query form: table name verbatim in path",
+			input:     "MyTable?base_id=appXXXX",
+			wantBase:  "appXXXX",
+			wantTable: "MyTable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ref, err := parseTableName(tt.input, tt.defaultBaseID)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseTableName() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil {
+				return
+			}
+			if ref.baseID != tt.wantBase {
+				t.Errorf("baseID = %v, want %v", ref.baseID, tt.wantBase)
+			}
+			if ref.tableName != tt.wantTable {
+				t.Errorf("tableName = %v, want %v", ref.tableName, tt.wantTable)
+			}
+		})
+	}
+}
+
 func TestFlattenRecords(t *testing.T) {
 	raw := []json.RawMessage{
 		json.RawMessage(`{"id":"rec123","createdTime":"2024-01-01T00:00:00.000Z","fields":{"Name":"Alice","Age":30}}`),

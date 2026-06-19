@@ -14,6 +14,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -98,11 +99,46 @@ type tableRef struct {
 	tableName string
 }
 
+var airtableParamKeys = []string{"base_id"}
+
+// parseTableName parses a source-table string in either form:
+//
+//	tblYYYY?base_id=appXXXX            (URL-style; preferred)
+//	appXXXX/tblYYYY                    (legacy slash form)
+//	tblYYYY                            (table only; base_id comes from URI)
+//
+// The query form is selected only when tablespec.Split detects a parameter
+// block. In all other cases the legacy slash-then-fallback logic runs
+// unchanged.
 func parseTableName(name, defaultBaseID string) (tableRef, error) {
 	if name == "" {
 		return tableRef{}, fmt.Errorf("airtable source table is required")
 	}
 
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return tableRef{}, err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, airtableParamKeys...); err != nil {
+			return tableRef{}, err
+		}
+		tableName := path
+		if tableName == "" {
+			return tableRef{}, fmt.Errorf("airtable source table is required")
+		}
+		baseID := params.Get("base_id")
+		if baseID == "" {
+			baseID = defaultBaseID
+		}
+		if baseID == "" {
+			return tableRef{}, fmt.Errorf("airtable base_id is required: provide it as '<base_id>/<table_id_or_name>' in --source-table or as base_id query param in the URI")
+		}
+		return tableRef{baseID: baseID, tableName: tableName}, nil
+	}
+
+	// Legacy slash form, preserved exactly.
 	if baseID, tableName, ok := strings.Cut(name, "/"); ok {
 		if baseID == "" || tableName == "" {
 			return tableRef{}, fmt.Errorf("airtable source table must be in format '<base_id>/<table_id_or_name>' or '<table_id_or_name>' with base_id in URI, got: %s", name)

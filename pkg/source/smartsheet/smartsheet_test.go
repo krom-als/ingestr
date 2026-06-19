@@ -144,6 +144,55 @@ func TestResolveSheetID(t *testing.T) {
 	}
 }
 
+func TestResolveSheetID_QueryForm(t *testing.T) {
+	tests := []struct {
+		name        string
+		sourceTable string
+		want        string
+		wantErr     string
+	}{
+		{
+			name:        "sheet?sheet_id= returns the id",
+			sourceTable: "sheet?sheet_id=7263572591493252",
+			want:        "7263572591493252",
+		},
+		{
+			name:        "query form with leading/trailing space in value",
+			sourceTable: "sheet?sheet_id=1234567890",
+			want:        "1234567890",
+		},
+		{
+			name:        "unknown query key errors",
+			sourceTable: "sheet?sheet_id=123&bad_key=x",
+			wantErr:     "unknown table parameter",
+		},
+		{
+			name:        "query form with missing sheet_id errors",
+			sourceTable: "sheet?sheet_id=",
+			wantErr:     "sheet_id parameter is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &SmartsheetSource{}
+			got, err := s.resolveSheetID(tt.sourceTable)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("resolveSheetID = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGetTable_PassesResolvedSheetID(t *testing.T) {
 	ctx := context.Background()
 

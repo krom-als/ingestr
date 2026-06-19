@@ -17,6 +17,7 @@ import (
 	ingestrhttp "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -435,7 +436,40 @@ func (s *WistiaSource) GetTable(ctx context.Context, req source.TableRequest) (s
 	}, nil
 }
 
+// wistiaParamKeys are the query parameters recognized in the URL-style table form.
+var wistiaParamKeys = []string{"id"}
+
 func resolveTable(table string) (tableConfig, string, error) {
+	path, params, hasQuery, err := tablespec.Split(table)
+	if err != nil {
+		return tableConfig{}, "", err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, wistiaParamKeys...); err != nil {
+			return tableConfig{}, "", err
+		}
+		base := strings.TrimSpace(path)
+		cfg, ok := tableConfigs[base]
+		if !ok {
+			return tableConfig{}, "", fmt.Errorf("unsupported table: %s (supported: %s)", table, strings.Join(supportedTableNames(), ", "))
+		}
+		id := params.Get("id")
+		if cfg.requiresParam && id == "" {
+			return tableConfig{}, "", fmt.Errorf("%s requires an id parameter, e.g. %s?id=abc123", base, base)
+		}
+		if id != "" && !cfg.requiresParam && !cfg.allowsParam {
+			return tableConfig{}, "", fmt.Errorf("%s does not accept an id parameter", base)
+		}
+		// Normalize to legacy form so read/readPaginated/readOnce can call parseTableName unchanged.
+		normalized := base
+		if id != "" {
+			normalized = base + ":" + id
+		}
+		return cfg, normalized, nil
+	}
+
+	// Legacy colon form, preserved exactly.
 	base, param := parseTableName(table)
 	cfg, ok := tableConfigs[base]
 	if !ok {

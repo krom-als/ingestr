@@ -15,6 +15,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -95,10 +96,51 @@ func parseNotionURI(uri string) (string, error) {
 	return apiKey, nil
 }
 
-func (s *NotionSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
-	databaseID := req.Name
+var notionParamKeys = []string{"all"}
 
-	if databaseID == "*" {
+// parseNotionTableSpec parses the source-table string into a database ID and the
+// all flag. It accepts two forms:
+//
+//	<uuid>            – ingest that specific database (legacy, unchanged)
+//	*                 – discover and ingest all accessible databases (legacy, unchanged)
+//	?all=true         – equivalent to "*" (new URL-style form)
+//	<uuid>?all=false  – same as plain <uuid> (idiomatic no-op)
+//
+// The legacy forms are returned unchanged; the query form is only activated when
+// tablespec.Split detects a parameter block.
+func parseNotionTableSpec(name string) (databaseID string, all bool, err error) {
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return "", false, err
+	}
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, notionParamKeys...); err != nil {
+			return "", false, err
+		}
+		allVal := strings.TrimSpace(params.Get("all"))
+		switch allVal {
+		case "true", "1":
+			return "", true, nil
+		case "false", "0", "":
+			return strings.TrimSpace(path), false, nil
+		default:
+			return "", false, fmt.Errorf("invalid all parameter %q: expected true or false", allVal)
+		}
+	}
+	// Legacy: "*" or a plain database UUID, preserved byte-for-byte.
+	if name == "*" {
+		return "", true, nil
+	}
+	return name, false, nil
+}
+
+func (s *NotionSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
+	databaseID, all, err := parseNotionTableSpec(req.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	if all {
 		databases, err := s.discoverDatabases(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover notion databases: %w", err)

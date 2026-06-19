@@ -127,6 +127,109 @@ func TestParseReportTableName(t *testing.T) {
 	}
 }
 
+func TestParseReportTableName_QueryForm(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		wantBase    string
+		wantGran    string
+		wantGroupBy []string
+		wantErr     string
+	}{
+		{
+			name:     "granularity only",
+			input:    "campaign_reports?granularity=daily",
+			wantBase: "campaign_reports",
+			wantGran: "DAILY",
+		},
+		{
+			name:     "granularity case insensitive",
+			input:    "campaign_reports?granularity=HOURLY",
+			wantBase: "campaign_reports",
+			wantGran: "HOURLY",
+		},
+		{
+			name:        "single group_by repeated key",
+			input:       "campaign_reports?granularity=daily&group_by=countryOrRegion",
+			wantBase:    "campaign_reports",
+			wantGran:    "DAILY",
+			wantGroupBy: []string{"countryOrRegion"},
+		},
+		{
+			name:        "multiple group_by repeated keys",
+			input:       "campaign_reports?granularity=daily&group_by=countryOrRegion&group_by=gender",
+			wantBase:    "campaign_reports",
+			wantGran:    "DAILY",
+			wantGroupBy: []string{"countryOrRegion", "gender"},
+		},
+		{
+			name:        "comma-joined group_by single key",
+			input:       "campaign_reports?granularity=daily&group_by=countryOrRegion,gender",
+			wantBase:    "campaign_reports",
+			wantGran:    "DAILY",
+			wantGroupBy: []string{"countryOrRegion", "gender"},
+		},
+		{
+			name:        "group_by without granularity",
+			input:       "ad_group_reports?group_by=deviceClass",
+			wantBase:    "ad_group_reports",
+			wantGran:    "",
+			wantGroupBy: []string{"deviceClass"},
+		},
+		{
+			name:     "no params at all (no query block)",
+			input:    "campaign_reports",
+			wantBase: "campaign_reports",
+			wantGran: "",
+		},
+		{
+			name:    "invalid granularity in query form",
+			input:   "campaign_reports?granularity=yearly",
+			wantErr: `invalid granularity "yearly"`,
+		},
+		{
+			name:    "invalid group_by field in query form",
+			input:   "campaign_reports?group_by=invalidField",
+			wantErr: `invalid groupBy field "invalidField"`,
+		},
+		{
+			name:    "unknown query param",
+			input:   "campaign_reports?granularity=daily&typo=x",
+			wantErr: "unknown table parameter(s)",
+		},
+		{
+			name:        "all supported group_by fields via repeated keys",
+			input:       "campaign_reports?group_by=countryOrRegion&group_by=ageRange&group_by=gender&group_by=deviceClass&group_by=adminArea&group_by=locality&group_by=countryCode",
+			wantBase:    "campaign_reports",
+			wantGran:    "",
+			wantGroupBy: []string{"countryOrRegion", "ageRange", "gender", "deviceClass", "adminArea", "locality", "countryCode"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseReportTableName(tt.input)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantBase, got.baseTable)
+			assert.Equal(t, tt.wantGran, got.granularity)
+			assert.Equal(t, tt.wantGroupBy, got.groupBy)
+		})
+	}
+}
+
+func TestSplitGroupBy(t *testing.T) {
+	assert.Equal(t, []string{"countryOrRegion", "gender"}, splitGroupBy("countryOrRegion,gender"))
+	assert.Equal(t, []string{"deviceClass"}, splitGroupBy("deviceClass"))
+	assert.Equal(t, []string{"ageRange", "locality"}, splitGroupBy(" ageRange , locality "))
+	assert.Nil(t, splitGroupBy(""))
+	assert.Nil(t, splitGroupBy(",,,"))
+}
+
 func dateStr(t time.Time) string {
 	return t.Format("2006-01-02")
 }

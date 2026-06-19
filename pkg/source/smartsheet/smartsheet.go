@@ -13,6 +13,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const smartsheetBaseURL = "https://api.smartsheet.com/2.0"
@@ -108,35 +109,56 @@ func (s *SmartsheetSource) HandlesIncrementality() bool {
 	return false
 }
 
+// smartsheetParamKeys lists the query parameters accepted by the URL-style table form.
+var smartsheetParamKeys = []string{"sheet_id"}
+
 // resolveSheetID interprets the value passed as --source-table and returns the
-// numeric sheet ID to ingest. Three forms are accepted:
+// numeric sheet ID to ingest. Accepted forms:
 //
-//   - "sheet"           — fall back to the smartsheet_id URI parameter
-//   - "sheet:<id>"      — use the part after the colon
-//   - "<id>"            — use the value directly
+//	sheet?sheet_id=7263572591493252       (URL-style; preferred)
+//	<id>                                   (bare numeric ID)
+//	sheet:<id>                             (explicit colon prefix)
+//	sheet                                  (falls back to smartsheet_id URI param)
 func (s *SmartsheetSource) resolveSheetID(sourceTable string) (string, error) {
-	if sourceTable == "" {
+	path, params, hasQuery, err := tablespec.Split(sourceTable)
+	if err != nil {
+		return "", err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, smartsheetParamKeys...); err != nil {
+			return "", err
+		}
+		id := strings.TrimSpace(params.Get("sheet_id"))
+		if id == "" {
+			return "", fmt.Errorf("sheet_id parameter is required when using the query form")
+		}
+		return id, nil
+	}
+
+	// Legacy forms — preserved exactly.
+	if path == "" {
 		if s.smartsheetID != "" {
 			return s.smartsheetID, nil
 		}
 		return "", fmt.Errorf("sheet ID is required: pass it as --source-table or via the smartsheet_id URI parameter")
 	}
 
-	if sourceTable == "sheet" {
+	if path == "sheet" {
 		if s.smartsheetID == "" {
 			return "", fmt.Errorf("--source-table=sheet requires the smartsheet_id URI parameter to be set")
 		}
 		return s.smartsheetID, nil
 	}
 
-	if id, ok := strings.CutPrefix(sourceTable, "sheet:"); ok {
+	if id, ok := strings.CutPrefix(path, "sheet:"); ok {
 		if id == "" {
 			return "", fmt.Errorf("invalid --source-table %q: missing sheet ID after \"sheet:\"", sourceTable)
 		}
 		return id, nil
 	}
 
-	return sourceTable, nil
+	return path, nil
 }
 
 func (s *SmartsheetSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {

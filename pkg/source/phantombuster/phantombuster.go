@@ -15,6 +15,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -102,27 +103,65 @@ var supportedTables = map[string]tableMeta{
 	"completed_phantoms": {primaryKeys: []string{"container_id"}, incrementalKey: "ended_at", strategy: config.StrategyMerge},
 }
 
-func (s *PhantombusterSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
-	tableName := req.Name
+// phantombusterParamKeys are the query parameters recognized by the URL-style
+// source-table form (see parsePhantombusterSpec).
+var phantombusterParamKeys = []string{"agent_id"}
 
-	var meta tableMeta
-	switch {
-	case strings.HasPrefix(tableName, "completed_phantoms:"):
-		agentID := strings.TrimPrefix(tableName, "completed_phantoms:")
-		if agentID == "" {
-			return nil, fmt.Errorf("agent_id is required: use completed_phantoms:<agent_id>")
-		}
-		meta = supportedTables["completed_phantoms"]
-	default:
-		tables := make([]string, 0, len(supportedTables))
-		for t := range supportedTables {
-			tables = append(tables, t)
-		}
-		return nil, fmt.Errorf("unsupported table: %s (supported: %v)", tableName, tables)
+type phantombusterSpec struct {
+	table   string
+	agentID string
+}
+
+// parsePhantombusterSpec parses a source-table string in either form:
+//
+//	completed_phantoms?agent_id=1234567890   (URL-style; preferred)
+//	completed_phantoms:<agent_id>             (legacy colon form)
+//
+// agent_id is required for completed_phantoms in both forms.
+func parsePhantombusterSpec(name string) (phantombusterSpec, error) {
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return phantombusterSpec{}, err
 	}
 
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, phantombusterParamKeys...); err != nil {
+			return phantombusterSpec{}, err
+		}
+		table := strings.TrimSpace(path)
+		if table != "completed_phantoms" {
+			return phantombusterSpec{}, fmt.Errorf("unsupported table: %s (supported: [completed_phantoms])", table)
+		}
+		agentID := params.Get("agent_id")
+		if agentID == "" {
+			return phantombusterSpec{}, fmt.Errorf("agent_id is required: use completed_phantoms?agent_id=<agent_id>")
+		}
+		return phantombusterSpec{table: table, agentID: agentID}, nil
+	}
+
+	// Legacy colon form, preserved exactly.
+	switch {
+	case strings.HasPrefix(name, "completed_phantoms:"):
+		agentID := strings.TrimPrefix(name, "completed_phantoms:")
+		if agentID == "" {
+			return phantombusterSpec{}, fmt.Errorf("agent_id is required: use completed_phantoms:<agent_id>")
+		}
+		return phantombusterSpec{table: "completed_phantoms", agentID: agentID}, nil
+	default:
+		return phantombusterSpec{}, fmt.Errorf("unsupported table: %s (supported: [completed_phantoms])", name)
+	}
+}
+
+func (s *PhantombusterSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
+	spec, err := parsePhantombusterSpec(req.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	meta := supportedTables[spec.table]
+
 	return &source.DynamicSourceTable{
-		TableName:           tableName,
+		TableName:           req.Name,
 		TablePrimaryKeys:    meta.primaryKeys,
 		TableIncrementalKey: meta.incrementalKey,
 		TableStrategy:       meta.strategy,
@@ -132,24 +171,23 @@ func (s *PhantombusterSource) GetTable(ctx context.Context, req source.TableRequ
 			return nil, fmt.Errorf("phantombuster source does not have a predefined schema; schema inference is required")
 		},
 		ReadFn: func(ctx context.Context, opts source.ReadOptions) (<-chan source.RecordBatchResult, error) {
-			return s.read(ctx, tableName, opts)
+			return s.read(ctx, spec, opts)
 		},
 	}, nil
 }
 
-func (s *PhantombusterSource) read(ctx context.Context, table string, opts source.ReadOptions) (<-chan source.RecordBatchResult, error) {
+func (s *PhantombusterSource) read(ctx context.Context, spec phantombusterSpec, opts source.ReadOptions) (<-chan source.RecordBatchResult, error) {
 	results := make(chan source.RecordBatchResult, 8)
 
 	go func() {
 		defer close(results)
 
 		var err error
-		switch {
-		case strings.HasPrefix(table, "completed_phantoms:"):
-			agentID := strings.TrimPrefix(table, "completed_phantoms:")
-			err = s.readCompletedPhantoms(ctx, agentID, opts, results)
+		switch spec.table {
+		case "completed_phantoms":
+			err = s.readCompletedPhantoms(ctx, spec.agentID, opts, results)
 		default:
-			err = fmt.Errorf("unsupported table: %s", table)
+			err = fmt.Errorf("unsupported table: %s", spec.table)
 		}
 
 		if err != nil {

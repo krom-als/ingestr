@@ -188,6 +188,133 @@ func TestWistiaDateRange(t *testing.T) {
 	require.NotEmpty(t, end)
 }
 
+func TestParseTableName(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		input     string
+		wantBase  string
+		wantParam string
+	}{
+		{"medias", "medias", ""},
+		{"captions", "captions", ""},
+		{"captions:abc123", "captions", "abc123"},
+		{"stats_media_by_date:xyz", "stats_media_by_date", "xyz"},
+		{"folder:", "folder", ""},
+		{"a:b:c", "a", "b:c"},
+		{"", "", ""},
+	}
+
+	for _, c := range cases {
+		t.Run(c.input, func(t *testing.T) {
+			t.Parallel()
+			base, param := parseTableName(c.input)
+			assert.Equal(t, c.wantBase, base)
+			assert.Equal(t, c.wantParam, param)
+		})
+	}
+}
+
+func TestResolveTable(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		// no-param tables
+		{name: "medias no param", input: "medias", wantErr: false},
+		{name: "account no param", input: "account", wantErr: false},
+		// no-param table with unexpected param → error
+		{name: "medias with param rejected", input: "medias:abc", wantErr: true},
+		// requiresParam tables — param provided → ok
+		{name: "folder with param", input: "folder:abc123", wantErr: false},
+		{name: "media with param", input: "media:abc123", wantErr: false},
+		// requiresParam tables — param missing → error
+		{name: "folder without param", input: "folder", wantErr: true},
+		{name: "stats_media_by_date without param", input: "stats_media_by_date", wantErr: true},
+		// allowsParam tables — param present → ok
+		{name: "captions with param", input: "captions:m123", wantErr: false},
+		{name: "stats_events with param", input: "stats_events:m456", wantErr: false},
+		// allowsParam tables — no param → ok
+		{name: "captions without param", input: "captions", wantErr: false},
+		{name: "stats_events without param", input: "stats_events", wantErr: false},
+		// allowsParam table with empty param (bare colon) — treated as param="" which is allowed
+		{name: "captions empty param", input: "captions:", wantErr: false},
+		// unknown table → error
+		{name: "unknown table", input: "nonexistent_table", wantErr: true},
+		{name: "empty string", input: "", wantErr: true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			_, got, err := resolveTable(c.input)
+			if c.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, c.input, got)
+		})
+	}
+}
+
+// TestResolveTableQueryForm covers the URL-style ?id= form added by the
+// tablespec migration. Legacy cases are in TestResolveTable above.
+func TestResolveTableQueryForm(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		input    string
+		wantNorm string // normalized (legacy-form) table name returned
+		wantErr  bool
+	}{
+		// requiresParam tables with ?id=
+		{name: "folder with query id", input: "folder?id=abc123", wantNorm: "folder:abc123"},
+		{name: "media with query id", input: "media?id=xyz456", wantNorm: "media:xyz456"},
+		{name: "stats_media_by_date with query id", input: "stats_media_by_date?id=m999", wantNorm: "stats_media_by_date:m999"},
+		// requiresParam missing id → error
+		{name: "folder query form no id", input: "folder?id=", wantErr: true},
+		{name: "media query form no id", input: "media?id=", wantErr: true},
+		// allowsParam tables with ?id= → ok
+		{name: "captions with query id", input: "captions?id=m123", wantNorm: "captions:m123"},
+		{name: "stats_events with query id", input: "stats_events?id=media_hash", wantNorm: "stats_events:media_hash"},
+		// allowsParam tables without ?id= → ok (no id param in query, but hasQuery=false → legacy path, already covered)
+		// no-param tables with ?id= → error
+		{name: "medias rejects query id", input: "medias?id=abc", wantErr: true},
+		{name: "account rejects query id", input: "account?id=foo", wantErr: true},
+		// unknown table in query form → error
+		{name: "unknown table query form", input: "nonexistent?id=x", wantErr: true},
+		// unknown key → error
+		{name: "unknown param key", input: "media?bogus=x", wantErr: true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			_, got, err := resolveTable(c.input)
+			if c.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, c.wantNorm, got)
+		})
+	}
+}
+
+// TestResolveTableQuirkBareColonAllowsParam verifies that the legacy quirk
+// "captions:" (bare colon, empty param) continues to pass after the migration.
+func TestResolveTableQuirkBareColonAllowsParam(t *testing.T) {
+	t.Parallel()
+	_, got, err := resolveTable("captions:")
+	require.NoError(t, err)
+	assert.Equal(t, "captions:", got)
+}
+
 func TestResponseItems(t *testing.T) {
 	t.Run("rejects unexpected object for array response", func(t *testing.T) {
 		items, err := responseItems([]byte(`{"pagination":{"next":2}}`), true)

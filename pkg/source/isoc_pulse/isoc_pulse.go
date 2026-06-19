@@ -15,6 +15,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -147,11 +148,31 @@ func (s *IsocPulseSource) GetTable(ctx context.Context, req source.TableRequest)
 	}, nil
 }
 
+var isocPulseParamKeys = []string{"country", "topsites", "shutdown_type", "ip_version"}
+
 func parseTableName(name string) (string, []string, error) {
 	if name == "" {
 		return "", nil, fmt.Errorf("table name is required")
 	}
 
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return "", nil, err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, isocPulseParamKeys...); err != nil {
+			return "", nil, err
+		}
+		metric := strings.TrimSpace(path)
+		opts, err := buildOptsFromParams(metric, params)
+		if err != nil {
+			return "", nil, err
+		}
+		return metric, opts, nil
+	}
+
+	// Legacy colon form, preserved exactly.
 	parts := strings.Split(name, ":")
 	metric := parts[0]
 	var opts []string
@@ -159,6 +180,69 @@ func parseTableName(name string) (string, []string, error) {
 		opts = parts[1:]
 	}
 	return metric, opts, nil
+}
+
+// buildOptsFromParams converts query parameters to the positional opts slice that
+// buildMetricConfig expects. Each metric has its own positional contract; the
+// named params map cleanly onto that contract:
+//
+//   - net_loss:  opts[0]=shutdown_type  opts[1]=country  (both required)
+//   - roa:       opts[0]=ip_version  [opts[1]=country]
+//   - https/ipv6: ["topsites"] if topsites=true, then [country] if present
+//   - dnssec_*:  [country]
+//   - resilience: [country]
+//   - no-option metrics: no params accepted (validated by validateOptions)
+func buildOptsFromParams(metric string, params url.Values) ([]string, error) {
+	country := strings.TrimSpace(params.Get("country"))
+	topsites := strings.TrimSpace(params.Get("topsites"))
+	shutdownType := strings.TrimSpace(params.Get("shutdown_type"))
+	ipVersion := strings.TrimSpace(params.Get("ip_version"))
+
+	switch metric {
+	case "net_loss":
+		// validateOptions requires exactly 2 opts; build them unconditionally so
+		// validateOptions can produce the right error for missing values.
+		return []string{shutdownType, country}, nil
+
+	case "roa":
+		if ipVersion != "" && country != "" {
+			return []string{ipVersion, country}, nil
+		}
+		if ipVersion != "" {
+			return []string{ipVersion}, nil
+		}
+		if country != "" {
+			return []string{country}, nil
+		}
+		return nil, nil
+
+	case "https", "ipv6":
+		var opts []string
+		if topsites == "true" {
+			opts = append(opts, "topsites")
+		}
+		if country != "" {
+			opts = append(opts, country)
+		}
+		return opts, nil
+
+	case "dnssec_validation", "dnssec_tld_adoption", "dnssec_adoption":
+		if country != "" {
+			return []string{country}, nil
+		}
+		return nil, nil
+
+	case "resilience":
+		if country != "" {
+			return []string{country}, nil
+		}
+		return nil, nil
+
+	default:
+		// no-option metrics and unknown metrics: return no opts; validateOptions
+		// will reject any stray param values for no-option metrics.
+		return nil, nil
+	}
 }
 
 func isValidTable(metric string) bool {

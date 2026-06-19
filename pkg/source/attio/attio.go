@@ -14,6 +14,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -118,9 +119,56 @@ func parseTableName(table string) (string, string) {
 	return parts[0], ""
 }
 
+// attioParamKeys are the query parameters recognized by the URL-style table form.
+var attioParamKeys = []string{"object", "list_id"}
+
+type attioTableSpec struct {
+	table string
+	param string
+}
+
+// parseAttioTableSpec parses the source-table string in either form:
+//
+//	records?object=companies          (URL-style; preferred)
+//	records:companies                 (legacy colon form)
+func parseAttioTableSpec(name string) (attioTableSpec, error) {
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return attioTableSpec{}, err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, attioParamKeys...); err != nil {
+			return attioTableSpec{}, err
+		}
+		spec := attioTableSpec{table: strings.TrimSpace(path)}
+		switch spec.table {
+		case "records", "all_list_entries":
+			spec.param = params.Get("object")
+		case "list_entries":
+			spec.param = params.Get("list_id")
+		case "objects", "lists":
+			// these tables take no param; reject any supplied keys
+			if params.Get("object") != "" || params.Get("list_id") != "" {
+				return attioTableSpec{}, fmt.Errorf("%s does not accept parameters", spec.table)
+			}
+		}
+		return spec, nil
+	}
+
+	// Legacy colon form, preserved exactly.
+	table, param := parseTableName(name)
+	return attioTableSpec{table: table, param: param}, nil
+}
+
 func (s *AttioSource) read(ctx context.Context, table string, opts source.ReadOptions) (<-chan source.RecordBatchResult, error) {
 	results := make(chan source.RecordBatchResult, 8)
-	name, param := parseTableName(table)
+	spec, err := parseAttioTableSpec(table)
+	if err != nil {
+		close(results)
+		return results, err
+	}
+	name, param := spec.table, spec.param
 
 	go func() {
 		defer close(results)

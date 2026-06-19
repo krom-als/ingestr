@@ -16,6 +16,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 	"golang.org/x/net/publicsuffix"
 )
 
@@ -132,7 +133,7 @@ func (s *FluxxSource) GetTable(ctx context.Context, req source.TableRequest) (so
 		return nil, fmt.Errorf("table name is required for fluxx source")
 	}
 
-	parsed, err := parseTableSpec(tableName)
+	parsed, err := parseFluxxTableSpec(tableName)
 	if err != nil {
 		return nil, err
 	}
@@ -161,6 +162,49 @@ func (s *FluxxSource) GetTable(ctx context.Context, req source.TableRequest) (so
 			return s.read(ctx, parsed, opts)
 		},
 	}, nil
+}
+
+var fluxxParamKeys = []string{"fields"}
+
+// parseFluxxTableSpec parses a source-table string in either form:
+//
+//	grant_request?fields=id,amount_requested,status   (URL-style; single resource + explicit fields)
+//	grant_request:amount_requested,status             (legacy colon form; one resource + fields)
+//	grant_request,user,organization                   (legacy comma form; multiple resources)
+//
+// The multi-resource case has no URL-style equivalent; use the legacy comma form.
+func parseFluxxTableSpec(table string) (*parsedTableSpec, error) {
+	path, params, hasQuery, err := tablespec.Split(table)
+	if err != nil {
+		return nil, err
+	}
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, fluxxParamKeys...); err != nil {
+			return nil, err
+		}
+		resource := strings.TrimSpace(path)
+		if resource == "" {
+			return nil, fmt.Errorf("resource name is required in table specification")
+		}
+		result := &parsedTableSpec{
+			resources:    []string{resource},
+			customFields: make(map[string][]string),
+		}
+		if params.Has("fields") {
+			var fields []string
+			for _, f := range strings.Split(params.Get("fields"), ",") {
+				if t := strings.TrimSpace(f); t != "" {
+					fields = append(fields, t)
+				}
+			}
+			if len(fields) == 0 {
+				return nil, fmt.Errorf("at least one field is required in custom field specification")
+			}
+			result.customFields[resource] = fields
+		}
+		return result, nil
+	}
+	return parseTableSpec(table)
 }
 
 func parseTableSpec(table string) (*parsedTableSpec, error) {
