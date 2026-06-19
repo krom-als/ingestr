@@ -364,6 +364,23 @@ func TestCreateCustomReportTableDetails(t *testing.T) {
 	})
 }
 
+func TestGetTableNonCustomQueryPath(t *testing.T) {
+	t.Parallel()
+
+	s := NewAppLovinSource()
+	s.tables = s.getTables()
+
+	t.Run("non-custom path with query params returns clear error", func(t *testing.T) {
+		t.Parallel()
+		_, err := s.GetTable(context.Background(), source.TableRequest{
+			Name: "publisher-report?endpoint=report&report_type=publisher&dimensions=day",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported table")
+		assert.Contains(t, err.Error(), "publisher-report")
+	})
+}
+
 func TestCreateCustomReportTableFromParams(t *testing.T) {
 	t.Parallel()
 

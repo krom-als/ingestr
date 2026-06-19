@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -172,7 +173,14 @@ func parseFundraiseUpSpec(name string) (string, error) {
 			return "", err
 		}
 		base := strings.TrimSpace(path)
-		incremental := strings.EqualFold(params.Get("incremental"), "true")
+		rawVal := strings.TrimSpace(params.Get("incremental"))
+		if rawVal == "" {
+			return base, nil
+		}
+		incremental, parseErr := strconv.ParseBool(rawVal)
+		if parseErr != nil {
+			return "", fmt.Errorf("invalid incremental parameter %q: expected true or false", rawVal)
+		}
 		if incremental {
 			return base + ":incremental", nil
 		}

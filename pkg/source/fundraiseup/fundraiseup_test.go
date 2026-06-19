@@ -64,12 +64,35 @@ func TestParseFundraiseUpSpec_QueryFormErrors(t *testing.T) {
 	}{
 		{"donations?unknown=true", "unknown table parameter"},
 		{"donations?incremental=true&bogus=x", "unknown table parameter"},
+		{"donations?incremental=yes", "invalid incremental parameter"},
+		{"donations?incremental=on", "invalid incremental parameter"},
+		{"donations?incremental=no", "invalid incremental parameter"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.input, func(t *testing.T) {
 			_, err := parseFundraiseUpSpec(tc.input)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.errFrag)
+		})
+	}
+}
+
+func TestParseFundraiseUpSpec_IncrementalParseBool(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"donations?incremental=1", "donations:incremental"},
+		{"donations?incremental=0", "donations"},
+		{"donations?incremental=TRUE", "donations:incremental"},
+		{"donations?incremental=FALSE", "donations"},
+		{"donations?incremental=", "donations"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			got, err := parseFundraiseUpSpec(tc.input)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }

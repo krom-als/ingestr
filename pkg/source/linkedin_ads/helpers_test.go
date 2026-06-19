@@ -1,9 +1,11 @@
 package linkedinads
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/bruin-data/ingestr/pkg/source"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -486,5 +488,32 @@ func TestParseTimeInterval(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), start)
 		assert.Equal(t, time.Date(2024, 12, 31, 0, 0, 0, 0, time.UTC), end)
+	})
+}
+
+func TestGetTableQueryForm(t *testing.T) {
+	t.Parallel()
+
+	s := &LinkedInAdsSource{
+		accountIDs: []string{"123456"},
+	}
+	s.tables = s.getTables()
+
+	t.Run("query form custom?dimensions routes to custom analytics", func(t *testing.T) {
+		t.Parallel()
+		table, err := s.GetTable(context.Background(), source.TableRequest{
+			Name: "custom?dimensions=campaign,date&metrics=impressions",
+		})
+		require.NoError(t, err)
+		assert.NotNil(t, table)
+	})
+
+	t.Run("non-custom path with query params returns error", func(t *testing.T) {
+		t.Parallel()
+		_, err := s.GetTable(context.Background(), source.TableRequest{
+			Name: "members?dimensions=x",
+		})
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "custom analytics")
 	})
 }

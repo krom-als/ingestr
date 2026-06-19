@@ -112,7 +112,7 @@ var slackParamKeys = []string{"channel_ids"}
 type slackReadSpec struct {
 	table      string
 	channelIDs []string
-	rawName    string // original req.Name, for TableName
+	rawName    string
 }
 
 // parseSlackTableSpec parses a source-table string in either form:

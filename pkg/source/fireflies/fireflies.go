@@ -519,14 +519,8 @@ func isValidTable(table string) bool {
 
 var firefliesParamKeys = []string{"granularity"}
 
-// parseFirefliesSpec parses a source-table string in either form:
-//
-//	analytics?granularity=DAY   (URL-style; preferred)
-//	analytics:DAY               (legacy colon form)
-//
-// Returns the base table name and the uppercased granularity (empty string means
-// use the default 30-day chunk). The granularity parameter is only meaningful for
-// the analytics table; other tables return an empty granularity.
+// parseFirefliesSpec parses "analytics?granularity=DAY" (query form) or
+// "analytics:DAY" (legacy colon form) into table name and uppercased granularity.
 func parseFirefliesSpec(name string) (table, granularity string, err error) {
 	path, params, hasQuery, err := tablespec.Split(name)
 	if err != nil {

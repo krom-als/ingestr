@@ -215,6 +215,20 @@ func TestParseTableSpec(t *testing.T) {
 			wantErr: true,
 		},
 
+		// sheet= and sheets= in the same query are additive (not last-wins).
+		// The legacy "#" form is last-wins; this is an intentional difference in
+		// the query form because additive behavior is deterministic and expected.
+		{
+			name:  "query: sheet and sheets in same query are additive",
+			input: "a.xlsx?sheet=X&sheets=A|B",
+			want:  tableSpec{path: "a.xlsx", format: formatXLSX, sheets: []string{"X", "A", "B"}},
+		},
+		{
+			name:  "query: sep with surrounding whitespace is trimmed to match legacy",
+			input: "a.csv?format=csv&sep=%20%3B%20",
+			want:  tableSpec{path: "a.csv", format: formatCSV, sep: ";"},
+		},
+
 		// "?" glob wildcard must survive the query-form detection.
 		{
 			name:  "query: ? glob with extension stays a path",

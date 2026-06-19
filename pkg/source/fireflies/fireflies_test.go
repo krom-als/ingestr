@@ -495,10 +495,6 @@ func TestDateRange_WithValues(t *testing.T) {
 }
 
 // ============================================================================
-// TestGetTable_TableStringParsing — analytics:<granularity> prefix handling
-// ============================================================================
-
-// ============================================================================
 // TestParseFirefliesSpec — dual-parse: URL-style query form + legacy colon form
 // ============================================================================
 

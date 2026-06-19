@@ -370,12 +370,19 @@ func (s *BlobstoreSource) read(ctx context.Context, table string, opts source.Re
 	var bucket, pattern string
 	var formatHint FileFormat
 	var tableEncoding string
+	var err error
 
 	if s.provider == ProviderSFTP {
-		bucket, pattern, formatHint, tableEncoding = parseSFTPTablePattern(table)
+		bucket, pattern, formatHint, tableEncoding, err = parseSFTPTablePattern(table)
+		if err != nil {
+			return nil, err
+		}
 		config.Debug("[BLOBSTORE-SRC] Reading from SFTP pattern=%s, formatHint=%s, encoding=%q", pattern, formatHint, tableEncoding)
 	} else {
-		bucket, pattern, formatHint, tableEncoding = parseTablePattern(table)
+		bucket, pattern, formatHint, tableEncoding, err = parseTablePattern(table)
+		if err != nil {
+			return nil, err
+		}
 		config.Debug("[BLOBSTORE-SRC] Reading from bucket=%s, pattern=%s, formatHint=%s, encoding=%q", bucket, pattern, formatHint, tableEncoding)
 	}
 
@@ -1547,15 +1554,19 @@ func parseTableHints(s string) (FileFormat, string) {
 	return formatHint, encoding
 }
 
-func parseSFTPTablePattern(table string) (bucket, pattern string, formatHint FileFormat, encoding string) {
+func parseSFTPTablePattern(table string) (bucket, pattern string, formatHint FileFormat, encoding string, err error) {
 	formatHint = FormatUnknown
 
-	path, params, hasQuery, err := tablespec.Split(table)
-	if err == nil && hasQuery {
-		table = path
-		if tablespec.ValidateKeys(params, blobstoreParamKeys...) == nil {
-			formatHint, encoding = applyBlobstoreParams(params)
+	path, params, hasQuery, splitErr := tablespec.Split(table)
+	if splitErr != nil {
+		return "", "", FormatUnknown, "", splitErr
+	}
+	if hasQuery {
+		if validateErr := tablespec.ValidateKeys(params, blobstoreParamKeys...); validateErr != nil {
+			return "", "", FormatUnknown, "", validateErr
 		}
+		table = path
+		formatHint, encoding = applyBlobstoreParams(params)
 	}
 
 	if !hasQuery {
@@ -1570,18 +1581,22 @@ func parseSFTPTablePattern(table string) (bucket, pattern string, formatHint Fil
 	}
 
 	pattern = strings.TrimPrefix(table, "/")
-	return "", pattern, formatHint, encoding
+	return "", pattern, formatHint, encoding, nil
 }
 
-func parseTablePattern(table string) (bucket, pattern string, formatHint FileFormat, encoding string) {
+func parseTablePattern(table string) (bucket, pattern string, formatHint FileFormat, encoding string, err error) {
 	formatHint = FormatUnknown
 
-	path, params, hasQuery, err := tablespec.Split(table)
-	if err == nil && hasQuery {
-		table = path
-		if tablespec.ValidateKeys(params, blobstoreParamKeys...) == nil {
-			formatHint, encoding = applyBlobstoreParams(params)
+	path, params, hasQuery, splitErr := tablespec.Split(table)
+	if splitErr != nil {
+		return "", "", FormatUnknown, "", splitErr
+	}
+	if hasQuery {
+		if validateErr := tablespec.ValidateKeys(params, blobstoreParamKeys...); validateErr != nil {
+			return "", "", FormatUnknown, "", validateErr
 		}
+		table = path
+		formatHint, encoding = applyBlobstoreParams(params)
 	}
 
 	if !hasQuery {
@@ -1593,9 +1608,9 @@ func parseTablePattern(table string) (bucket, pattern string, formatHint FileFor
 
 	parts := strings.SplitN(table, "/", 2)
 	if len(parts) == 1 {
-		return parts[0], "*", formatHint, encoding
+		return parts[0], "*", formatHint, encoding, nil
 	}
-	return parts[0], parts[1], formatHint, encoding
+	return parts[0], parts[1], formatHint, encoding, nil
 }
 
 func applyBlobstoreParams(params url.Values) (formatHint FileFormat, encoding string) {

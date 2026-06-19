@@ -300,15 +300,6 @@ var salesforceTableMeta = map[string]tableMeta{
 // salesforceParamKeys are the query parameters accepted by the URL-style table form.
 var salesforceParamKeys = []string{"object"}
 
-// parseSalesforceTableSpec resolves a source-table string in either form:
-//
-//	custom?object=My_Object__c   (URL-style; preferred for custom objects)
-//	custom:My_Object__c          (legacy colon form)
-//	account                      (standard table, no params)
-//
-// For the query form the path must be "custom" and "object" is required.
-// The returned name is always the effective legacy form ("custom:<sobject>" or plain name)
-// so downstream logic remains unchanged.
 func parseSalesforceTableSpec(name string) (string, error) {
 	path, params, hasQuery, err := tablespec.Split(name)
 	if err != nil {

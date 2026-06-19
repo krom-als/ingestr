@@ -1,8 +1,12 @@
 package jira
 
 import (
+	"context"
 	"encoding/json"
+	"strings"
 	"testing"
+
+	"github.com/bruin-data/ingestr/pkg/source"
 )
 
 func TestParseURI(t *testing.T) {
@@ -211,6 +215,66 @@ func TestJsonUseNumber(t *testing.T) {
 						t.Errorf("jsonUseNumber() value type = %T, want json.Number", v)
 					}
 				}
+			}
+		})
+	}
+}
+
+// TestGetTableRouting confirms that GetTable routes the query form correctly,
+// including the skip_archived validation that lives inside GetTable (not in the
+// parser), so tests that only call parseJiraSpec would miss it.
+func TestGetTableRouting(t *testing.T) {
+	s := NewJiraSource()
+	ctx := context.Background()
+
+	tests := []struct {
+		name          string
+		req           source.TableRequest
+		wantErr       bool
+		errSubstr     string
+		wantTableName string
+	}{
+		{
+			name:          "projects query form skip_archived=true succeeds",
+			req:           source.TableRequest{Name: "projects?skip_archived=true"},
+			wantTableName: "projects",
+		},
+		{
+			name:      "issues with skip_archived=true returns error",
+			req:       source.TableRequest{Name: "issues?skip_archived=true"},
+			wantErr:   true,
+			errSubstr: "does not support",
+		},
+		{
+			name:          "plain issues table with no params succeeds",
+			req:           source.TableRequest{Name: "issues"},
+			wantTableName: "issues",
+		},
+		{
+			name:      "unknown param rejected",
+			req:       source.TableRequest{Name: "projects?bad_param=true"},
+			wantErr:   true,
+			errSubstr: "unknown table parameter",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tbl, err := s.GetTable(ctx, tt.req)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
+					t.Errorf("error = %q, want substring %q", err.Error(), tt.errSubstr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tbl.Name() != tt.wantTableName {
+				t.Errorf("tbl.Name() = %q, want %q", tbl.Name(), tt.wantTableName)
 			}
 		})
 	}

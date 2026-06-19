@@ -180,12 +180,12 @@ func parseTableName(table string) (string, []string, error) {
 			return "", nil, err
 		}
 		tableName := strings.TrimSpace(path)
+		if tableName != "payments" {
+			return "", nil, fmt.Errorf("statuses parameter is only valid for the payments table")
+		}
 		var rawVals []string
 		for _, v := range params["statuses"] {
 			rawVals = append(rawVals, splitStatuses(v)...)
-		}
-		if tableName != "payments" && len(rawVals) > 0 {
-			return "", nil, fmt.Errorf("statuses parameter is only valid for the payments table")
 		}
 		if len(rawVals) == 0 {
 			return tableName, allStatuses(), nil

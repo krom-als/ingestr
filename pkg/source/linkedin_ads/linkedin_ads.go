@@ -99,7 +99,7 @@ func (s *LinkedInAdsSource) HandlesIncrementality() bool {
 }
 
 func (s *LinkedInAdsSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
-	if strings.HasPrefix(req.Name, "custom:") {
+	if strings.HasPrefix(req.Name, "custom:") || strings.HasPrefix(req.Name, "custom?") {
 		return s.getCustomAnalyticsTable(req.Name)
 	}
 

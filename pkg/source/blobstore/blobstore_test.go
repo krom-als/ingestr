@@ -338,7 +338,8 @@ func TestParseTablePattern(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bucket, pattern, format, encoding := parseTablePattern(tt.table)
+			bucket, pattern, format, encoding, err := parseTablePattern(tt.table)
+			require.NoError(t, err)
 			assert.Equal(t, tt.wantBucket, bucket, "bucket")
 			assert.Equal(t, tt.wantPattern, pattern, "pattern")
 			assert.Equal(t, tt.wantFormat, format, "format")
@@ -389,7 +390,8 @@ func TestParseSFTPTablePattern(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bucket, pattern, format, encoding := parseSFTPTablePattern(tt.table)
+			bucket, pattern, format, encoding, err := parseSFTPTablePattern(tt.table)
+			require.NoError(t, err)
 			assert.Equal(t, "", bucket, "SFTP bucket should always be empty")
 			assert.Equal(t, tt.wantPattern, pattern, "pattern")
 			assert.Equal(t, tt.wantFormat, format, "format")
@@ -710,7 +712,8 @@ func TestParseTablePatternQueryForm(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bucket, pattern, format, encoding := parseTablePattern(tt.table)
+			bucket, pattern, format, encoding, err := parseTablePattern(tt.table)
+			require.NoError(t, err)
 			assert.Equal(t, tt.wantBucket, bucket, "bucket")
 			assert.Equal(t, tt.wantPattern, pattern, "pattern")
 			assert.Equal(t, tt.wantFormat, format, "format")
@@ -739,7 +742,8 @@ func TestParseTablePatternGlobWildcardPreserved(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bucket, pattern, format, encoding := parseTablePattern(tt.table)
+			bucket, pattern, format, encoding, err := parseTablePattern(tt.table)
+			require.NoError(t, err)
 			assert.Equal(t, tt.wantBucket, bucket, "bucket")
 			assert.Equal(t, tt.wantPattern, pattern, "pattern")
 			assert.Equal(t, tt.wantFormat, format, "format")
@@ -767,13 +771,60 @@ func TestParseSFTPTablePatternQueryForm(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bucket, pattern, format, encoding := parseSFTPTablePattern(tt.table)
+			bucket, pattern, format, encoding, err := parseSFTPTablePattern(tt.table)
+			require.NoError(t, err)
 			assert.Equal(t, "", bucket, "SFTP bucket should always be empty")
 			assert.Equal(t, tt.wantPattern, pattern, "pattern")
 			assert.Equal(t, tt.wantFormat, format, "format")
 			assert.Equal(t, tt.wantEncoding, encoding, "encoding")
 		})
 	}
+}
+
+func TestParseTablePatternTypoReturnsError(t *testing.T) {
+	_, _, _, _, err := parseTablePattern("bucket/data?formaat=csv")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "formaat")
+}
+
+func TestParseTablePatternValidParamsWork(t *testing.T) {
+	bucket, pattern, format, encoding, err := parseTablePattern("bucket/data?format=csv&encoding=utf-8")
+	require.NoError(t, err)
+	assert.Equal(t, "bucket", bucket)
+	assert.Equal(t, "data", pattern)
+	assert.Equal(t, FormatCSV, format)
+	assert.Equal(t, "utf-8", encoding)
+}
+
+func TestParseTablePatternGlobNotQuery(t *testing.T) {
+	bucket, pattern, format, encoding, err := parseTablePattern("bucket/q?.csv")
+	require.NoError(t, err)
+	assert.Equal(t, "bucket", bucket)
+	assert.Equal(t, "q?.csv", pattern)
+	assert.Equal(t, FormatUnknown, format)
+	assert.Equal(t, "", encoding)
+}
+
+func TestParseSFTPTablePatternTypoReturnsError(t *testing.T) {
+	_, _, _, _, err := parseSFTPTablePattern("/exports/data?formaat=csv")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "formaat")
+}
+
+func TestParseSFTPTablePatternValidParamsWork(t *testing.T) {
+	_, pattern, format, encoding, err := parseSFTPTablePattern("/exports/data?format=csv&encoding=utf-8")
+	require.NoError(t, err)
+	assert.Equal(t, "exports/data", pattern)
+	assert.Equal(t, FormatCSV, format)
+	assert.Equal(t, "utf-8", encoding)
+}
+
+func TestParseSFTPTablePatternGlobNotQuery(t *testing.T) {
+	_, pattern, format, encoding, err := parseSFTPTablePattern("bucket/q?.csv")
+	require.NoError(t, err)
+	assert.Equal(t, "bucket/q?.csv", pattern)
+	assert.Equal(t, FormatUnknown, format)
+	assert.Equal(t, "", encoding)
 }
 
 func TestBuildS3InventoryQueryWithoutModifiedIncrementality(t *testing.T) {

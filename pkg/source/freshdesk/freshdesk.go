@@ -83,7 +83,10 @@ func (s *FreshdeskSource) Close(ctx context.Context) error {
 func (s *FreshdeskSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
 	tableName := req.Name
 
-	baseName, query := parseTableName(tableName)
+	baseName, query, err := parseTableName(tableName)
+	if err != nil {
+		return nil, err
+	}
 
 	if !isValidTable(baseName) {
 		return nil, fmt.Errorf("unsupported table: %s (supported: %s)", baseName, strings.Join(supportedTables, ", "))
@@ -110,24 +113,24 @@ func (s *FreshdeskSource) GetTable(ctx context.Context, req source.TableRequest)
 
 var freshdeskParamKeys = []string{"query"}
 
-func parseTableName(name string) (string, string) {
+func parseTableName(name string) (string, string, error) {
 	path, params, hasQuery, err := tablespec.Split(name)
 	if err != nil {
-		return name, ""
+		return "", "", err
 	}
 
 	if hasQuery {
 		if err := tablespec.ValidateKeys(params, freshdeskParamKeys...); err != nil {
-			return name, ""
+			return "", "", err
 		}
-		return strings.TrimSpace(path), params.Get("query")
+		return strings.TrimSpace(path), params.Get("query"), nil
 	}
 
 	parts := strings.SplitN(name, ":", 2)
 	if len(parts) == 2 {
-		return parts[0], parts[1]
+		return parts[0], parts[1], nil
 	}
-	return name, ""
+	return name, "", nil
 }
 
 func (s *FreshdeskSource) read(ctx context.Context, table, query string, opts source.ReadOptions) (<-chan source.RecordBatchResult, error) {

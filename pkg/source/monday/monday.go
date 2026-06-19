@@ -507,6 +507,8 @@ func parseMondaySpec(name string) (mondayReadSpec, error) {
 		if !boardAwareTables[base] {
 			return mondayReadSpec{}, fmt.Errorf("%s table must be in the format `%s`", base, base)
 		}
+		// Intentional asymmetry with the query form: "linked" on a non-items board-aware table
+		// (e.g. updates:linked) is silently treated as a board id here; the query form errors.
 		if base == "items" && segs[len(segs)-1] == "linked" {
 			spec.linked = true
 			segs = segs[:len(segs)-1]

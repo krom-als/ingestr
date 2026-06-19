@@ -268,10 +268,8 @@ type appStoreSpec struct {
 	appIDs []string
 }
 
-// parseAppStoreSpec parses a source-table string in either form:
-//
-//	app-downloads-detailed?app_ids=1234567890&app_ids=9876543210   (URL-style)
-//	app-downloads-detailed:1234567890,9876543210                    (legacy colon form)
+// parseAppStoreSpec parses "app-downloads-detailed?app_ids=123" (query form) or
+// "app-downloads-detailed:123,456" (legacy colon form) into a table spec.
 func parseAppStoreSpec(name string) (appStoreSpec, error) {
 	path, params, hasQuery, err := tablespec.Split(name)
 	if err != nil {

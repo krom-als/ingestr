@@ -132,6 +132,26 @@ func TestParseAttioTableSpec_QueryForm(t *testing.T) {
 			input:   "lists?list_id=abc",
 			wantErr: "lists does not accept parameters",
 		},
+		{
+			name:    "records rejects list_id (wrong key)",
+			input:   "records?list_id=abc-123",
+			wantErr: "does not accept 'list_id'",
+		},
+		{
+			name:    "all_list_entries rejects list_id (wrong key)",
+			input:   "all_list_entries?list_id=abc-123",
+			wantErr: "does not accept 'list_id'",
+		},
+		{
+			name:    "list_entries rejects object (wrong key)",
+			input:   "list_entries?object=companies",
+			wantErr: "does not accept 'object'",
+		},
+		{
+			name:    "unknown table in query form returns error",
+			input:   "unknown_table?object=foo",
+			wantErr: "unsupported attio table",
+		},
 	}
 
 	for _, tt := range tests {

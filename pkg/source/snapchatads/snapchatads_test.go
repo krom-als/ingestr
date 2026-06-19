@@ -581,6 +581,23 @@ func TestParseSnapchatAdsTableSpec_QueryForm(t *testing.T) {
 			input:   "campaigns_stats?granularity=DAY&pivot=invalid_pivot",
 			wantErr: true,
 		},
+		{
+			name:    "stats: account_ids rejected",
+			input:   "campaigns_stats?granularity=DAY&account_ids=acc-1",
+			wantErr: true,
+		},
+		{
+			name:         "stats: metrics from repeated keys joined",
+			input:        "campaigns_stats?granularity=DAY&metrics=impressions&metrics=spend",
+			wantResource: "campaigns_stats",
+			wantSC:       &statsConfig{granularity: "DAY", fields: "impressions,spend"},
+		},
+		{
+			name:         "stats: metrics mixed repeated and comma-separated",
+			input:        "ad_squads_stats?granularity=TOTAL&metrics=impressions,spend&metrics=video_views",
+			wantResource: "ad_squads_stats",
+			wantSC:       &statsConfig{granularity: "TOTAL", fields: "impressions,spend,video_views"},
+		},
 	}
 
 	for _, tt := range tests {

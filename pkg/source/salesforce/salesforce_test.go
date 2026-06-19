@@ -169,55 +169,62 @@ func TestSalesforceGetTableTableNameParsing(t *testing.T) {
 	s := NewSalesforceSource()
 
 	tests := []struct {
-		name         string
-		req          source.TableRequest
-		wantErr      bool
-		errSubstr    string
-		wantPKs      []string
-		wantStrategy config.IncrementalStrategy
-		wantIncrKey  string
+		name          string
+		req           source.TableRequest
+		wantErr       bool
+		errSubstr     string
+		wantTableName string
+		wantPKs       []string
+		wantStrategy  config.IncrementalStrategy
+		wantIncrKey   string
 	}{
 		{
-			name:         "known standard table account",
-			req:          source.TableRequest{Name: "account"},
-			wantPKs:      []string{"Id"},
-			wantStrategy: config.StrategyMerge,
-			wantIncrKey:  "SystemModstamp",
+			name:          "known standard table account",
+			req:           source.TableRequest{Name: "account"},
+			wantTableName: "account",
+			wantPKs:       []string{"Id"},
+			wantStrategy:  config.StrategyMerge,
+			wantIncrKey:   "SystemModstamp",
 		},
 		{
-			name:         "known replace-strategy table campaign",
-			req:          source.TableRequest{Name: "campaign"},
-			wantPKs:      []string{"Id"},
-			wantStrategy: config.StrategyReplace,
-			wantIncrKey:  "",
+			name:          "known replace-strategy table campaign",
+			req:           source.TableRequest{Name: "campaign"},
+			wantTableName: "campaign",
+			wantPKs:       []string{"Id"},
+			wantStrategy:  config.StrategyReplace,
+			wantIncrKey:   "",
 		},
 		{
-			name:         "custom object",
-			req:          source.TableRequest{Name: "custom:MyObject__c"},
-			wantPKs:      nil,
-			wantStrategy: config.StrategyReplace,
-			wantIncrKey:  "",
+			name:          "custom object legacy colon form",
+			req:           source.TableRequest{Name: "custom:MyObject__c"},
+			wantTableName: "custom:MyObject__c",
+			wantPKs:       nil,
+			wantStrategy:  config.StrategyReplace,
+			wantIncrKey:   "",
 		},
 		{
-			name:         "custom object with incremental key override",
-			req:          source.TableRequest{Name: "custom:MyObject__c", IncrementalKey: "UpdatedAt__c"},
-			wantPKs:      []string{"Id"},
-			wantStrategy: config.StrategyMerge,
-			wantIncrKey:  "UpdatedAt__c",
+			name:          "custom object with incremental key override",
+			req:           source.TableRequest{Name: "custom:MyObject__c", IncrementalKey: "UpdatedAt__c"},
+			wantTableName: "custom:MyObject__c",
+			wantPKs:       []string{"Id"},
+			wantStrategy:  config.StrategyMerge,
+			wantIncrKey:   "UpdatedAt__c",
 		},
 		{
-			name:         "standard table incremental key override switches to merge",
-			req:          source.TableRequest{Name: "account", IncrementalKey: "CreatedDate"},
-			wantPKs:      []string{"Id"},
-			wantStrategy: config.StrategyMerge,
-			wantIncrKey:  "CreatedDate",
+			name:          "standard table incremental key override switches to merge",
+			req:           source.TableRequest{Name: "account", IncrementalKey: "CreatedDate"},
+			wantTableName: "account",
+			wantPKs:       []string{"Id"},
+			wantStrategy:  config.StrategyMerge,
+			wantIncrKey:   "CreatedDate",
 		},
 		{
-			name:         "standard table with caller-supplied PKs preserved",
-			req:          source.TableRequest{Name: "user", PrimaryKeys: []string{"Username"}},
-			wantPKs:      []string{"Username"},
-			wantStrategy: config.StrategyReplace,
-			wantIncrKey:  "",
+			name:          "standard table with caller-supplied PKs preserved",
+			req:           source.TableRequest{Name: "user", PrimaryKeys: []string{"Username"}},
+			wantTableName: "user",
+			wantPKs:       []string{"Username"},
+			wantStrategy:  config.StrategyReplace,
+			wantIncrKey:   "",
 		},
 		{
 			name:      "empty table name",
@@ -244,7 +251,7 @@ func TestSalesforceGetTableTableNameParsing(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			assert.Equal(t, tt.req.Name, tbl.Name())
+			assert.Equal(t, tt.wantTableName, tbl.Name())
 			assert.Equal(t, tt.wantPKs, tbl.PrimaryKeys())
 			assert.Equal(t, tt.wantStrategy, tbl.Strategy())
 			assert.Equal(t, tt.wantIncrKey, tbl.IncrementalKey())

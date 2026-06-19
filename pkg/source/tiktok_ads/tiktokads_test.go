@@ -1,10 +1,12 @@
 package tiktokads
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
 
+	"github.com/bruin-data/ingestr/pkg/source"
 	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
@@ -567,6 +569,60 @@ func TestParseCustomTableQuery(t *testing.T) {
 			}
 			if !intSliceEqual(filterVals, tt.wantFilterVal) {
 				t.Errorf("filterValues = %v, want %v", filterVals, tt.wantFilterVal)
+			}
+		})
+	}
+}
+
+// TestGetTableQueryFormRouting confirms that GetTable routes the query form
+// (custom?dimensions=...&metrics=...) correctly — the gap that let the
+// linkedin_ads routing blocker slip through.
+func TestGetTableQueryFormRouting(t *testing.T) {
+	s := NewTiktokAdsSource()
+	ctx := context.Background()
+
+	tests := []struct {
+		name          string
+		req           source.TableRequest
+		wantTableName string
+		wantErr       bool
+	}{
+		{
+			name:          "query form routes correctly",
+			req:           source.TableRequest{Name: "custom?dimensions=campaign_id,stat_time_day&metrics=impressions,spend"},
+			wantTableName: "custom_reports",
+		},
+		{
+			name:          "legacy colon form still works",
+			req:           source.TableRequest{Name: "custom:campaign_id,stat_time_day:impressions,spend"},
+			wantTableName: "custom_reports",
+		},
+		{
+			name:    "wrong path in query form returns error",
+			req:     source.TableRequest{Name: "other?dimensions=campaign_id&metrics=spend"},
+			wantErr: true,
+		},
+		{
+			name:    "incremental key rejected",
+			req:     source.TableRequest{Name: "custom?dimensions=campaign_id&metrics=spend", IncrementalKey: "stat_time_day"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tbl, err := s.GetTable(ctx, tt.req)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tbl.Name() != tt.wantTableName {
+				t.Errorf("tbl.Name() = %q, want %q", tbl.Name(), tt.wantTableName)
 			}
 		})
 	}

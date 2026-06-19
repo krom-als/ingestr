@@ -168,19 +168,20 @@ func parseAppLovinMaxSpec(name string) (string, []string, error) {
 		if !isValidTable(tableName) {
 			return "", nil, fmt.Errorf("unsupported table: %s (supported: %s)", tableName, strings.Join(supportedTables, ", "))
 		}
-		var apps []string
+		var raw []string
 		for _, v := range params["app_ids"] {
-			apps = append(apps, splitAppIDs(v)...)
+			raw = append(raw, splitAppIDs(v)...)
 		}
-		if len(apps) == 0 {
+		if len(raw) == 0 {
 			return "", nil, fmt.Errorf("at least one application id is required")
 		}
-		seen := make(map[string]bool, len(apps))
-		for _, a := range apps {
-			if seen[a] {
-				return "", nil, fmt.Errorf("duplicate application id: %s", a)
+		seen := make(map[string]bool, len(raw))
+		var apps []string
+		for _, a := range raw {
+			if !seen[a] {
+				seen[a] = true
+				apps = append(apps, a)
 			}
-			seen[a] = true
 		}
 		return tableName, apps, nil
 	}

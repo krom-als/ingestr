@@ -252,6 +252,18 @@ func TestParseTableNameQueryForm(t *testing.T) {
 			wantErr:   true,
 			errSubstr: "statuses parameter is only valid for the payments table",
 		},
+		{
+			name:      "non-payments table query form without statuses rejected early",
+			table:     "orders?statuses=",
+			wantErr:   true,
+			errSubstr: "statuses parameter is only valid for the payments table",
+		},
+		{
+			name:      "unknown table query form rejected early",
+			table:     "refunds?statuses=",
+			wantErr:   true,
+			errSubstr: "statuses parameter is only valid for the payments table",
+		},
 	}
 
 	for _, tt := range tests {

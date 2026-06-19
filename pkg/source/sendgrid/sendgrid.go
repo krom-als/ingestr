@@ -332,7 +332,7 @@ func parseTableName(name string) (table string, aggregatedBy string, err error) 
 			return "", "", fmt.Errorf("unsupported table: %s (supported: %s)", name, supportedTableList())
 		}
 		if table != "global_stats" {
-			if params.Has("granularity") {
+			if params.Has("granularity") && params.Get("granularity") != "" {
 				return "", "", fmt.Errorf("table %q does not support a granularity suffix", table)
 			}
 			return table, "", nil

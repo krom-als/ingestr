@@ -224,7 +224,7 @@ func resolveTableConfig(tableName string) (tableConfig, error) {
 		if err := tablespec.ValidateKeys(params, posthogParamKeys...); err != nil {
 			return tableConfig{}, err
 		}
-		return resolveTableConfigFromParts(path, params.Get("variant"))
+		return resolveTableConfigFromParts(strings.TrimSpace(path), params.Get("variant"))
 	}
 
 	// Legacy colon form, preserved exactly.

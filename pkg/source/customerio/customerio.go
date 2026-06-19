@@ -390,12 +390,8 @@ func (s *CustomerIOSource) GetTable(ctx context.Context, req source.TableRequest
 	}, nil
 }
 
-// parseCustomerIOSpec parses a source-table string in either form:
-//
-//	campaign_metrics?period=days   (URL-style; preferred)
-//	campaign_metrics:days          (legacy colon form)
-//
-// Non-metrics tables accept a plain name with no period in either form.
+// parseCustomerIOSpec parses "campaign_metrics?period=days" (query form) or
+// "campaign_metrics:days" (legacy colon form) into table name and period.
 func parseCustomerIOSpec(name string) (table, period string, err error) {
 	path, params, hasQuery, err := tablespec.Split(name)
 	if err != nil {

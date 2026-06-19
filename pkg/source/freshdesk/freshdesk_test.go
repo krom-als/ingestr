@@ -1,9 +1,11 @@
 package freshdesk
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
+	"github.com/bruin-data/ingestr/pkg/source"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -89,7 +91,8 @@ func TestParseTableName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			base, query := parseTableName(tt.input)
+			base, query, err := parseTableName(tt.input)
+			require.NoError(t, err)
 			assert.Equal(t, tt.wantBase, base)
 			assert.Equal(t, tt.wantQuery, query)
 		})
@@ -223,6 +226,8 @@ func TestParseTableName_QueryForm(t *testing.T) {
 		input     string
 		wantBase  string
 		wantQuery string
+		wantErr   bool
+		errSubstr string
 	}{
 		{
 			name:      "simple query param",
@@ -255,16 +260,24 @@ func TestParseTableName_QueryForm(t *testing.T) {
 			wantQuery: "",
 		},
 		{
-			name:      "unknown param key falls back to legacy",
-			input:     "tickets?unknown=foo",
-			wantBase:  "tickets?unknown=foo",
-			wantQuery: "",
+			name:      "typo'd param key returns error",
+			input:     "tickets?queery=x",
+			wantErr:   true,
+			errSubstr: "queery",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			base, query := parseTableName(tt.input)
+			base, query, err := parseTableName(tt.input)
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errSubstr != "" {
+					assert.Contains(t, err.Error(), tt.errSubstr)
+				}
+				return
+			}
+			require.NoError(t, err)
 			assert.Equal(t, tt.wantBase, base)
 			assert.Equal(t, tt.wantQuery, query)
 		})
@@ -294,8 +307,10 @@ func TestParseTableName_Equivalence(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.legacy, func(t *testing.T) {
-			legacyBase, legacyQuery := parseTableName(c.legacy)
-			newBase, newQuery := parseTableName(c.queryFrm)
+			legacyBase, legacyQuery, legacyErr := parseTableName(c.legacy)
+			newBase, newQuery, newErr := parseTableName(c.queryFrm)
+			require.NoError(t, legacyErr)
+			require.NoError(t, newErr)
 			assert.Equal(t, legacyBase, newBase, "base mismatch")
 			assert.Equal(t, legacyQuery, newQuery, "query mismatch")
 		})
@@ -327,9 +342,19 @@ func TestParseTableName_QuestionMarkInLegacyQuery(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			base, query := parseTableName(tt.input)
+			base, query, err := parseTableName(tt.input)
+			require.NoError(t, err)
 			assert.Equal(t, tt.wantBase, base)
 			assert.Equal(t, tt.wantQuery, query)
 		})
 	}
+}
+
+func TestGetTable_UnknownParamReturnsError(t *testing.T) {
+	s := &FreshdeskSource{}
+	ctx := context.Background()
+	_, err := s.GetTable(ctx, source.TableRequest{Name: "tickets?queery=x"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "queery")
+	assert.NotContains(t, err.Error(), "unsupported table")
 }

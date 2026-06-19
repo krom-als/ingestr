@@ -122,7 +122,11 @@ func parseNotionTableSpec(name string) (databaseID string, all bool, err error) 
 		case "true", "1":
 			return "", true, nil
 		case "false", "0", "":
-			return strings.TrimSpace(path), false, nil
+			dbID := strings.TrimSpace(path)
+			if dbID == "" {
+				return "", false, fmt.Errorf("database ID is required when all=false")
+			}
+			return dbID, false, nil
 		default:
 			return "", false, fmt.Errorf("invalid all parameter %q: expected true or false", allVal)
 		}

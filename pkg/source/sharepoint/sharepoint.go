@@ -265,9 +265,6 @@ func parseURI(uri string) (connConfig, error) {
 	return cfg, nil
 }
 
-// sharepointParamKeys are the query parameters recognized by the URL-style
-// source-table form (see parseTableSpec). Kept as the single source of truth for
-// strict validation so a typo errors instead of being silently dropped.
 var sharepointParamKeys = []string{
 	"sheet", "sheets", "skip", "encoding", "sep", "format", "raw", "formatted", "drop_empty", "date_cols",
 }
@@ -446,7 +443,7 @@ func applyParams(spec *tableSpec, p url.Values) error {
 		spec.encoding = strings.TrimSpace(p.Get("encoding"))
 	}
 	if p.Has("sep") {
-		spec.sep = p.Get("sep")
+		spec.sep = strings.TrimSpace(p.Get("sep"))
 	}
 	if p.Has("format") {
 		spec.format = parseFormat(p.Get("format"))

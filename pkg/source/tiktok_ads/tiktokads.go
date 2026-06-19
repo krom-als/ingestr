@@ -264,7 +264,7 @@ func parseCustomTableQuery(params url.Values) (dimensions, metrics []string, fil
 		return nil, nil, "", nil, fmt.Errorf("TikTok API requires at least one ID dimension: [campaign_id, adgroup_id, ad_id]")
 	}
 
-	filtered := dimensions[:0]
+	filtered := make([]string, 0, len(dimensions))
 	for _, d := range dimensions {
 		if d != "advertiser_id" {
 			filtered = append(filtered, d)

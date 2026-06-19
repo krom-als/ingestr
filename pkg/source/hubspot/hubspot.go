@@ -614,6 +614,9 @@ func applyHubspotParams(path string, params url.Values) (hubspotTableSpec, error
 		if strings.HasPrefix(path, historyPrefix) {
 			spec.historyProps = nilIfEmpty(properties)
 		} else {
+			if len(properties) > 0 {
+				return hubspotTableSpec{}, fmt.Errorf("'properties' parameter is only valid for 'property_history:*' tables")
+			}
 			if len(associations) > 0 {
 				spec.assocOverride = associations
 			}

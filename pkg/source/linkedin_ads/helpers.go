@@ -213,6 +213,9 @@ func parseCustomTableName(tableName string) (*customAnalyticsConfig, error) {
 	}
 
 	if hasQuery {
+		if path != "custom" {
+			return nil, fmt.Errorf("unsupported table: %s (only 'custom' supports query parameters)", path)
+		}
 		if err := tablespec.ValidateKeys(params, linkedinAdsParamKeys...); err != nil {
 			return nil, err
 		}
@@ -224,7 +227,6 @@ func parseCustomTableName(tableName string) (*customAnalyticsConfig, error) {
 		for _, v := range params["metrics"] {
 			metrics = append(metrics, splitValues(v)...)
 		}
-		_ = path
 		return buildCustomAnalyticsConfig(dimensions, metrics)
 	}
 

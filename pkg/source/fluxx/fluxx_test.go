@@ -282,6 +282,22 @@ func TestParseFluxxTableSpec_QueryForm(t *testing.T) {
 			wantErr:   true,
 			errSubstr: "resource name is required",
 		},
+		{
+			name:          "query form repeated fields key collects all values",
+			table:         "grant_request?fields=id&fields=amount_requested&fields=status",
+			wantResources: []string{"grant_request"},
+			wantCustomField: map[string][]string{
+				"grant_request": {"id", "amount_requested", "status"},
+			},
+		},
+		{
+			name:          "query form mixed repeated and comma-joined fields",
+			table:         "grant_request?fields=id,amount_requested&fields=status",
+			wantResources: []string{"grant_request"},
+			wantCustomField: map[string][]string{
+				"grant_request": {"id", "amount_requested", "status"},
+			},
+		},
 	}
 
 	for _, tt := range tests {

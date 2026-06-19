@@ -152,6 +152,10 @@ func parseSnapchatAdsTableSpec(name string) (parsedSnapchatTable, error) {
 		result := parsedSnapchatTable{resourceName: resourceName}
 
 		if rc.Level == statsLevel {
+			if len(params["account_ids"]) > 0 {
+				return parsedSnapchatTable{}, fmt.Errorf("'account_ids' is not valid for stats table '%s'", resourceName)
+			}
+
 			gran := strings.ToUpper(strings.TrimSpace(params.Get("granularity")))
 			if gran == "" {
 				return parsedSnapchatTable{}, fmt.Errorf(
@@ -190,8 +194,16 @@ func parseSnapchatAdsTableSpec(name string) (parsedSnapchatTable, error) {
 			}
 
 			fields := defaultStatsFields
-			if v := strings.TrimSpace(params.Get("metrics")); v != "" {
-				fields = v
+			if rawMetrics := strings.TrimSpace(strings.Join(params["metrics"], ",")); rawMetrics != "" {
+				var parts []string
+				for _, v := range strings.Split(rawMetrics, ",") {
+					if t := strings.TrimSpace(v); t != "" {
+						parts = append(parts, t)
+					}
+				}
+				if len(parts) > 0 {
+					fields = strings.Join(parts, ",")
+				}
 			}
 
 			result.sc = &statsConfig{

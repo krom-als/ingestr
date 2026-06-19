@@ -249,12 +249,13 @@ func (s *AppLovinSource) GetTable(ctx context.Context, req source.TableRequest) 
 		return nil, err
 	}
 	if hasQuery {
+		if path != "custom" {
+			return nil, fmt.Errorf("unsupported table: %s (only 'custom' supports query parameters)", path)
+		}
 		if err := tablespec.ValidateKeys(params, applovinParamKeys...); err != nil {
 			return nil, err
 		}
-		if path == "custom" {
-			return s.createCustomReportTableFromParams(params)
-		}
+		return s.createCustomReportTableFromParams(params)
 	}
 
 	// Handle custom reports: custom:{endpoint}:{report_type}:{dimensions}

@@ -165,13 +165,8 @@ func (d *OneLakeDestination) filesDir() string {
 
 var onelakeParamKeys = []string{"area"}
 
-// parseTarget splits a dest-table into a write mode and relative path.
-//
-// Legacy: a leading "Tables/" or "Files/" prefix selects the mode; a bare name
-// defaults to Tables mode.
-//
-// Query form: "mydata?area=tables" or "mydata?area=files". If a prefix is also
-// present (e.g. "Tables/mydata?area=files"), the prefix wins and area is ignored.
+// parseTarget splits a dest-table into a write mode and relative path; a "Tables/"
+// or "Files/" path prefix takes precedence over the ?area= query parameter.
 func parseTarget(table string) (writeMode, string, error) {
 	path, params, hasQuery, err := tablespec.Split(table)
 	if err != nil {

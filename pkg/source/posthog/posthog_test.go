@@ -318,6 +318,24 @@ func collectBatches(t *testing.T, ch <-chan source.RecordBatchResult) []source.R
 	return results
 }
 
+func TestResolveTableConfigQueryFormTrimSpace(t *testing.T) {
+	cases := []struct {
+		input    string
+		wantEndp string
+	}{
+		{" events?variant=", "events"},
+		{"  annotations?variant=", "annotations"},
+		{" property_definitions?variant=event", "property_definitions"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			cfg, err := resolveTableConfig(tc.input)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantEndp, cfg.endpoint)
+		})
+	}
+}
+
 func TestResolveTableConfigQueryForm(t *testing.T) {
 	tests := []struct {
 		name        string

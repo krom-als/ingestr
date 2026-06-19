@@ -285,6 +285,17 @@ func TestParseTableNameQueryForm(t *testing.T) {
 			input:   "https?region=US",
 			wantErr: true,
 		},
+		{
+			name:       "https topsites=1 treated as true",
+			input:      "https?topsites=1",
+			wantMetric: "https",
+			wantOpts:   []string{"topsites"},
+		},
+		{
+			name:    "http with country param rejected",
+			input:   "http?country=US",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -394,6 +405,24 @@ func TestBuildOptsFromParams(t *testing.T) {
 			metric:   "http",
 			params:   url.Values{},
 			wantOpts: nil,
+		},
+		{
+			name:    "net_loss empty shutdown_type and country",
+			metric:  "net_loss",
+			params:  makeParams("shutdown_type", "", "country", ""),
+			wantErr: true,
+		},
+		{
+			name:    "net_loss missing shutdown_type",
+			metric:  "net_loss",
+			params:  makeParams("country", "US"),
+			wantErr: true,
+		},
+		{
+			name:    "no-option metric with country param",
+			metric:  "http",
+			params:  makeParams("country", "US"),
+			wantErr: true,
 		},
 	}
 

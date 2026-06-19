@@ -192,9 +192,11 @@ func parseFluxxTableSpec(table string) (*parsedTableSpec, error) {
 		}
 		if params.Has("fields") {
 			var fields []string
-			for _, f := range strings.Split(params.Get("fields"), ",") {
-				if t := strings.TrimSpace(f); t != "" {
-					fields = append(fields, t)
+			for _, v := range params["fields"] {
+				for _, f := range strings.Split(v, ",") {
+					if t := strings.TrimSpace(f); t != "" {
+						fields = append(fields, t)
+					}
 				}
 			}
 			if len(fields) == 0 {

@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -200,8 +201,9 @@ func buildOptsFromParams(metric string, params url.Values) ([]string, error) {
 
 	switch metric {
 	case "net_loss":
-		// validateOptions requires exactly 2 opts; build them unconditionally so
-		// validateOptions can produce the right error for missing values.
+		if shutdownType == "" || country == "" {
+			return nil, fmt.Errorf("metric 'net_loss' requires both 'shutdown_type' and 'country' parameters to be non-empty")
+		}
 		return []string{shutdownType, country}, nil
 
 	case "roa":
@@ -212,14 +214,21 @@ func buildOptsFromParams(metric string, params url.Values) ([]string, error) {
 			return []string{ipVersion}, nil
 		}
 		if country != "" {
+			// Legacy-consistent: roa:US (country only) maps country into the ip_version slot.
 			return []string{country}, nil
 		}
 		return nil, nil
 
 	case "https", "ipv6":
 		var opts []string
-		if topsites == "true" {
-			opts = append(opts, "topsites")
+		if topsites != "" {
+			ts, err := strconv.ParseBool(topsites)
+			if err != nil {
+				return nil, fmt.Errorf("invalid value for 'topsites': %q (expected true/false)", topsites)
+			}
+			if ts {
+				opts = append(opts, "topsites")
+			}
 		}
 		if country != "" {
 			opts = append(opts, country)
@@ -239,8 +248,10 @@ func buildOptsFromParams(metric string, params url.Values) ([]string, error) {
 		return nil, nil
 
 	default:
-		// no-option metrics and unknown metrics: return no opts; validateOptions
-		// will reject any stray param values for no-option metrics.
+		// no-option metrics: reject any supplied named param.
+		if country != "" || topsites != "" || shutdownType != "" || ipVersion != "" {
+			return nil, fmt.Errorf("metric %q does not accept any parameters", metric)
+		}
 		return nil, nil
 	}
 }

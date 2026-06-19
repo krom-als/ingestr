@@ -1,17 +1,7 @@
 // Package tablespec parses ingestr table strings that carry URL-style query
-// parameters layered on top of a base path or object name, for example:
-//
-//	Reports/q1.xlsx?sheet=Sheet1&skip=2
-//	items?board_ids=12345&board_ids=67890
-//
-// The query form gives connectors a single, consistent way to express per-table
-// options that mirrors the URI concept, and lets tools such as Bruin compile a
-// structured parameter list down to the table string generically — a YAML list
-// becomes a repeated query key, which url.Values represents as a slice.
-//
-// Connectors adopt it incrementally: Split reports whether a query component was
-// present, so a connector can keep its existing (legacy) table-string parsing as
-// the authority whenever the table string carries no parameter block.
+// parameters (e.g. "items?board_ids=12345&board_ids=67890"). Split reports
+// whether a parameter block was present so connectors can fall back to legacy
+// parsing when none is found.
 package tablespec
 
 import (
@@ -37,8 +27,8 @@ var paramKeyToken = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(=.*)?$`)
 // parameter block (see looksLikeParams). This keeps a "?" used as a glob wildcard
 // — e.g. "Reports/q?.xlsx" — or as a URL's own query delimiter out of harm's way.
 // Query values are URL-decoded; the path is returned verbatim (it may contain
-// spaces and "&"). A literal "?" that must sit in the path alongside parameters
-// should be percent-encoded.
+// spaces and "&"). To include a literal "?" in the path when a parameter block is
+// also present, percent-encode it as %3F (e.g. "Reports/q%3F.xlsx?sheet=Jan").
 func Split(raw string) (path string, params url.Values, hasQuery bool, err error) {
 	i := strings.LastIndexByte(raw, '?')
 	if i < 0 || !looksLikeParams(raw[i+1:]) {

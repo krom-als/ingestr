@@ -182,6 +182,16 @@ func TestParseHubspotTableSpec_QueryForms(t *testing.T) {
 			input:   "contacts?object=something",
 			wantErr: true,
 		},
+		{
+			name:    "properties param on standard table rejected",
+			input:   "contacts?properties=email",
+			wantErr: true,
+		},
+		{
+			name:    "properties param on standard table with assoc also rejected",
+			input:   "deals?associations=companies&properties=amount",
+			wantErr: true,
+		},
 	}
 
 	for _, tc := range cases {

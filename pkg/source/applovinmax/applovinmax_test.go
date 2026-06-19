@@ -170,9 +170,10 @@ func TestParseAppLovinMaxSpec_QueryForm(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name:      "duplicate app_ids in query form",
+			name:      "duplicate app_ids in query form are silently deduped (matches legacy pass-through)",
 			table:     "user_ad_revenue?app_ids=com.example.app1&app_ids=com.example.app1",
-			wantError: true,
+			wantTable: "user_ad_revenue",
+			wantApps:  []string{"com.example.app1"},
 		},
 		{
 			name:      "unsupported table in query form",

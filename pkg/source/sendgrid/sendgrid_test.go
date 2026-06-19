@@ -170,12 +170,12 @@ func TestParseTableNameQueryForm(t *testing.T) {
 		{name: "global_stats week", input: "global_stats?granularity=week", wantTable: "global_stats", wantAggr: "week"},
 		{name: "global_stats month", input: "global_stats?granularity=month", wantTable: "global_stats", wantAggr: "month"},
 		{name: "global_stats day explicit", input: "global_stats?granularity=day", wantTable: "global_stats", wantAggr: "day"},
-		{name: "plain table no params", input: "lists?granularity=", wantErr: true, errSubstr: "does not support a granularity suffix"},
+		{name: "plain table no params", input: "lists?granularity=", wantTable: "lists", wantAggr: ""},
 		{name: "plain table with granularity errors", input: "lists?granularity=week", wantErr: true, errSubstr: "does not support a granularity suffix"},
 		{name: "unknown table", input: "contacts?granularity=day", wantErr: true, errSubstr: "unsupported table"},
 		{name: "invalid granularity", input: "global_stats?granularity=hour", wantErr: true, errSubstr: "invalid granularity"},
 		{name: "unknown param key errors", input: "global_stats?interval=week", wantErr: true, errSubstr: "unknown table parameter"},
-		{name: "messages no params", input: "messages?granularity=", wantErr: true, errSubstr: "does not support a granularity suffix"},
+		{name: "messages no params", input: "messages?granularity=", wantTable: "messages", wantAggr: ""},
 	}
 
 	for _, tt := range tests {
@@ -189,6 +189,27 @@ func TestParseTableNameQueryForm(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantTable, table)
 			assert.Equal(t, tt.wantAggr, aggr)
+		})
+	}
+}
+
+func TestParseTableNameEmptyGranularityIsNoOp(t *testing.T) {
+	cases := []struct {
+		input     string
+		wantTable string
+	}{
+		{"lists?granularity=", "lists"},
+		{"messages?granularity=", "messages"},
+		{"bounces?granularity=", "bounces"},
+		{"single_sends?granularity=", "single_sends"},
+		{"templates?granularity=", "templates"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			table, aggr, err := parseTableName(tc.input)
+			require.NoError(t, err, "empty granularity on non-global_stats should be a no-op")
+			assert.Equal(t, tc.wantTable, table)
+			assert.Equal(t, "", aggr)
 		})
 	}
 }

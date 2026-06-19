@@ -81,6 +81,24 @@ func TestParseNotionTableSpec(t *testing.T) {
 			wantErr:     true,
 			errContains: "invalid all parameter",
 		},
+		{
+			name:        "empty path with all=false requires database ID",
+			input:       "?all=false",
+			wantErr:     true,
+			errContains: "database ID is required",
+		},
+		{
+			name:        "empty path with all=0 requires database ID",
+			input:       "?all=0",
+			wantErr:     true,
+			errContains: "database ID is required",
+		},
+		{
+			name:        "empty path with no all value requires database ID",
+			input:       "?all=",
+			wantErr:     true,
+			errContains: "database ID is required",
+		},
 	}
 
 	for _, tt := range tests {

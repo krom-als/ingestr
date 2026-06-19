@@ -144,14 +144,21 @@ func parseAttioTableSpec(name string) (attioTableSpec, error) {
 		spec := attioTableSpec{table: strings.TrimSpace(path)}
 		switch spec.table {
 		case "records", "all_list_entries":
+			if params.Get("list_id") != "" {
+				return attioTableSpec{}, fmt.Errorf("%s does not accept 'list_id'; use 'object' instead", spec.table)
+			}
 			spec.param = params.Get("object")
 		case "list_entries":
+			if params.Get("object") != "" {
+				return attioTableSpec{}, fmt.Errorf("list_entries does not accept 'object'; use 'list_id' instead")
+			}
 			spec.param = params.Get("list_id")
 		case "objects", "lists":
-			// these tables take no param; reject any supplied keys
 			if params.Get("object") != "" || params.Get("list_id") != "" {
 				return attioTableSpec{}, fmt.Errorf("%s does not accept parameters", spec.table)
 			}
+		default:
+			return attioTableSpec{}, fmt.Errorf("unsupported attio table: %s", spec.table)
 		}
 		return spec, nil
 	}
