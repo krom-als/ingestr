@@ -16,6 +16,7 @@ import (
 	"github.com/bruin-data/ingestr/pkg/arrowconv"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 	analyticsdata "google.golang.org/api/analyticsdata/v1beta"
 	"google.golang.org/api/option"
 )
@@ -448,7 +449,19 @@ var dateTimeDimensions = map[string]string{
 	"dateHourMinute": "200601021504",
 }
 
+var googleAnalyticsParamKeys = []string{"dimensions", "metrics", "minute_ranges"}
+
 func buildReportConfig(table string) (*reportConfig, error) {
+	path, params, hasQuery, err := tablespec.Split(table)
+	if err != nil {
+		return nil, err
+	}
+
+	if hasQuery {
+		return buildReportConfigFromQuery(path, params)
+	}
+
+	// Legacy colon form, preserved exactly.
 	parts := strings.Split(table, ":")
 	if len(parts) < 3 || len(parts) > 4 {
 		return nil, fmt.Errorf("invalid table format, expected <report_type>:<dimensions>:<metrics> or <report_type>:<dimensions>:<metrics>:<minute_ranges>")
@@ -485,7 +498,6 @@ func buildReportConfig(table string) (*reportConfig, error) {
 
 	var minuteRanges []*analyticsdata.MinuteRange
 	if len(parts) == 4 {
-		var err error
 		minuteRanges, err = buildMinuteRanges(parts[3])
 		if err != nil {
 			return nil, err
@@ -501,6 +513,84 @@ func buildReportConfig(table string) (*reportConfig, error) {
 		endDate:      end,
 		minuteRanges: minuteRanges,
 	}, nil
+}
+
+func buildReportConfigFromQuery(rType string, params url.Values) (*reportConfig, error) {
+	rType = strings.TrimSpace(rType)
+	if err := tablespec.ValidateKeys(params, googleAnalyticsParamKeys...); err != nil {
+		return nil, err
+	}
+
+	if _, ok := supportedReportTypes[rType]; !ok {
+		return nil, fmt.Errorf("invalid report type %q, available report types: custom, realtime", rType)
+	}
+
+	dims := splitCommaSeparatedList(params["dimensions"])
+	if len(dims) == 0 {
+		return nil, fmt.Errorf("dimensions parameter is required")
+	}
+
+	mets := splitCommaSeparatedList(params["metrics"])
+	if len(mets) == 0 {
+		return nil, fmt.Errorf("metrics parameter is required")
+	}
+
+	var datetime string
+	if rType == "custom" {
+		for _, dim := range dims {
+			if _, ok := dateTimeDimensions[dim]; ok {
+				datetime = dim
+				break
+			}
+		}
+		if datetime == "" {
+			dtKeys := make([]string, 0, len(dateTimeDimensions))
+			for k := range dateTimeDimensions {
+				dtKeys = append(dtKeys, k)
+			}
+			return nil, fmt.Errorf("custom reports must include at least one datetime dimension: %v", dtKeys)
+		}
+	}
+
+	rawRanges := params["minute_ranges"]
+	if len(rawRanges) > 0 && rType != "realtime" {
+		return nil, fmt.Errorf("minute_ranges parameter is only valid for realtime reports")
+	}
+
+	var minuteRanges []*analyticsdata.MinuteRange
+	for _, r := range rawRanges {
+		parsed, err := buildMinuteRanges(r)
+		if err != nil {
+			return nil, err
+		}
+		minuteRanges = append(minuteRanges, parsed...)
+	}
+
+	now := time.Now().UTC()
+	start := now.AddDate(0, 0, -30).Truncate(24 * time.Hour)
+	end := now
+
+	return &reportConfig{
+		reportType:   rType,
+		dimensions:   dims,
+		metrics:      mets,
+		datetime:     datetime,
+		startDate:    start,
+		endDate:      end,
+		minuteRanges: minuteRanges,
+	}, nil
+}
+
+func splitCommaSeparatedList(vals []string) []string {
+	var out []string
+	for _, v := range vals {
+		for _, item := range strings.Split(strings.ReplaceAll(v, " ", ""), ",") {
+			if item != "" {
+				out = append(out, item)
+			}
+		}
+	}
+	return out
 }
 
 func buildMinuteRanges(raw string) ([]*analyticsdata.MinuteRange, error) {

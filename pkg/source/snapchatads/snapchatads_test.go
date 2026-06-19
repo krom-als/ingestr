@@ -482,3 +482,266 @@ func TestParseStatsTableWithDimensionAndPivot(t *testing.T) {
 	assert.Equal(t, "country", result.config.pivot)
 	assert.Equal(t, "impressions", result.config.fields)
 }
+
+// TestParseSnapchatAdsTableSpec_QueryForm tests the new URL-style query form.
+func TestParseSnapchatAdsTableSpec_QueryForm(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantResource string
+		wantSC       *statsConfig
+		wantAccounts []string
+		wantErr      bool
+	}{
+		{
+			name:         "stats: granularity only, default metrics",
+			input:        "campaigns_stats?granularity=DAY",
+			wantResource: "campaigns_stats",
+			wantSC:       &statsConfig{granularity: "DAY", fields: defaultStatsFields},
+		},
+		{
+			name:         "stats: granularity + explicit metrics",
+			input:        "campaigns_stats?granularity=DAY&metrics=impressions,spend",
+			wantResource: "campaigns_stats",
+			wantSC:       &statsConfig{granularity: "DAY", fields: "impressions,spend"},
+		},
+		{
+			name:         "stats: granularity + breakdown + metrics",
+			input:        "campaigns_stats?granularity=HOUR&breakdown=adsquad&metrics=spend",
+			wantResource: "campaigns_stats",
+			wantSC:       &statsConfig{granularity: "HOUR", breakdown: "adsquad", fields: "spend"},
+		},
+		{
+			name:         "stats: all options",
+			input:        "campaigns_stats?granularity=DAY&breakdown=campaign&dimension=GEO&pivot=country&metrics=impressions",
+			wantResource: "campaigns_stats",
+			wantSC:       &statsConfig{granularity: "DAY", breakdown: "campaign", dimension: "GEO", pivot: "country", fields: "impressions"},
+		},
+		{
+			name:         "stats: ad_squads_stats with TOTAL",
+			input:        "ad_squads_stats?granularity=TOTAL&metrics=impressions,spend",
+			wantResource: "ad_squads_stats",
+			wantSC:       &statsConfig{granularity: "TOTAL", fields: "impressions,spend"},
+		},
+		{
+			name:         "non-stats: no account_ids",
+			input:        "campaigns?account_ids=",
+			wantResource: "campaigns",
+		},
+		{
+			name:         "non-stats: single account_id",
+			input:        "campaigns?account_ids=acc-123",
+			wantResource: "campaigns",
+			wantAccounts: []string{"acc-123"},
+		},
+		{
+			name:         "non-stats: multiple account_ids repeated key",
+			input:        "invoices?account_ids=acc-1&account_ids=acc-2",
+			wantResource: "invoices",
+			wantAccounts: []string{"acc-1", "acc-2"},
+		},
+		{
+			name:         "non-stats: comma-separated account_ids in single key",
+			input:        "campaigns?account_ids=acc-1,acc-2",
+			wantResource: "campaigns",
+			wantAccounts: []string{"acc-1", "acc-2"},
+		},
+		{
+			name:    "unknown resource",
+			input:   "unknown_resource?granularity=DAY",
+			wantErr: true,
+		},
+		{
+			name:    "unknown param key",
+			input:   "campaigns_stats?granularity=DAY&unknownkey=foo",
+			wantErr: true,
+		},
+		{
+			name:    "stats: missing granularity",
+			input:   "campaigns_stats?metrics=impressions",
+			wantErr: true,
+		},
+		{
+			name:    "stats: invalid granularity",
+			input:   "campaigns_stats?granularity=WEEKLY",
+			wantErr: true,
+		},
+		{
+			name:    "stats: invalid breakdown",
+			input:   "campaigns_stats?granularity=DAY&breakdown=invalid",
+			wantErr: true,
+		},
+		{
+			name:    "stats: invalid dimension",
+			input:   "campaigns_stats?granularity=DAY&dimension=INVALID",
+			wantErr: true,
+		},
+		{
+			name:    "stats: invalid pivot",
+			input:   "campaigns_stats?granularity=DAY&pivot=invalid_pivot",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseSnapchatAdsTableSpec(tt.input)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantResource, got.resourceName)
+			assert.Equal(t, tt.wantSC, got.sc)
+			assert.Equal(t, tt.wantAccounts, got.adAccountIDs)
+		})
+	}
+}
+
+// TestParseSnapchatAdsTableSpec_LegacyPreserved verifies the legacy colon form is unchanged.
+func TestParseSnapchatAdsTableSpec_LegacyPreserved(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantResource string
+		wantSC       *statsConfig
+		wantAccounts []string
+		wantErr      bool
+	}{
+		{
+			name:         "legacy non-stats no param",
+			input:        "campaigns",
+			wantResource: "campaigns",
+		},
+		{
+			name:         "legacy non-stats with single account",
+			input:        "campaigns:acc-123",
+			wantResource: "campaigns",
+			wantAccounts: []string{"acc-123"},
+		},
+		{
+			name:         "legacy non-stats with multiple accounts",
+			input:        "campaigns:acc-1,acc-2",
+			wantResource: "campaigns",
+			wantAccounts: []string{"acc-1", "acc-2"},
+		},
+		{
+			name:         "legacy stats: DAY with metrics",
+			input:        "campaigns_stats:DAY:impressions,spend",
+			wantResource: "campaigns_stats",
+			wantSC:       &statsConfig{granularity: "DAY", fields: "impressions,spend"},
+		},
+		{
+			name:         "legacy stats: adsquad breakdown + HOUR",
+			input:        "campaigns_stats:adsquad,HOUR:spend",
+			wantResource: "campaigns_stats",
+			wantSC:       &statsConfig{granularity: "HOUR", breakdown: "adsquad", fields: "spend"},
+		},
+		{
+			name:         "legacy stats: default fields when no metrics segment",
+			input:        "ads_stats:TOTAL",
+			wantResource: "ads_stats",
+			wantSC:       &statsConfig{granularity: "TOTAL", fields: defaultStatsFields},
+		},
+		{
+			name:         "legacy stats: all options",
+			input:        "campaigns_stats:campaign,DAY,GEO,country:impressions",
+			wantResource: "campaigns_stats",
+			wantSC:       &statsConfig{granularity: "DAY", breakdown: "campaign", dimension: "GEO", pivot: "country", fields: "impressions"},
+		},
+		{
+			name:    "legacy stats: missing params",
+			input:   "campaigns_stats:",
+			wantErr: true,
+		},
+		{
+			name:    "unknown resource",
+			input:   "unknown_resource",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseSnapchatAdsTableSpec(tt.input)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantResource, got.resourceName)
+			assert.Equal(t, tt.wantSC, got.sc)
+			assert.Equal(t, tt.wantAccounts, got.adAccountIDs)
+		})
+	}
+}
+
+// TestParseSnapchatAdsTableSpec_Equivalence verifies that the query form and legacy form
+// produce identical internal config for representative inputs.
+func TestParseSnapchatAdsTableSpec_Equivalence(t *testing.T) {
+	pairs := []struct {
+		name   string
+		legacy string
+		query  string
+	}{
+		{
+			name:   "stats DAY with metrics",
+			legacy: "campaigns_stats:DAY:impressions,spend",
+			query:  "campaigns_stats?granularity=DAY&metrics=impressions,spend",
+		},
+		{
+			name:   "stats HOUR with breakdown",
+			legacy: "campaigns_stats:adsquad,HOUR:spend",
+			query:  "campaigns_stats?granularity=HOUR&breakdown=adsquad&metrics=spend",
+		},
+		{
+			name:   "stats TOTAL default metrics",
+			legacy: "ads_stats:TOTAL",
+			query:  "ads_stats?granularity=TOTAL",
+		},
+		{
+			name:   "stats all options",
+			legacy: "campaigns_stats:campaign,DAY,GEO,country:impressions",
+			query:  "campaigns_stats?granularity=DAY&breakdown=campaign&dimension=GEO&pivot=country&metrics=impressions",
+		},
+		{
+			name:   "stats ad breakdown HOUR",
+			legacy: "campaigns_stats:ad,HOUR:spend",
+			query:  "campaigns_stats?granularity=HOUR&breakdown=ad&metrics=spend",
+		},
+		{
+			name:   "stats ad_squads with TOTAL",
+			legacy: "ad_squads_stats:TOTAL:impressions,spend",
+			query:  "ad_squads_stats?granularity=TOTAL&metrics=impressions,spend",
+		},
+		{
+			name:   "non-stats no account",
+			legacy: "campaigns",
+			query:  "campaigns?account_ids=",
+		},
+		{
+			name:   "non-stats single account",
+			legacy: "campaigns:acc-123",
+			query:  "campaigns?account_ids=acc-123",
+		},
+		{
+			name:   "non-stats multiple accounts",
+			legacy: "campaigns:acc-1,acc-2",
+			query:  "campaigns?account_ids=acc-1&account_ids=acc-2",
+		},
+	}
+
+	for _, p := range pairs {
+		t.Run(p.name, func(t *testing.T) {
+			legacyResult, err := parseSnapchatAdsTableSpec(p.legacy)
+			require.NoError(t, err, "legacy form failed")
+
+			queryResult, err := parseSnapchatAdsTableSpec(p.query)
+			require.NoError(t, err, "query form failed")
+
+			assert.Equal(t, legacyResult.resourceName, queryResult.resourceName, "resourceName mismatch")
+			assert.Equal(t, legacyResult.adAccountIDs, queryResult.adAccountIDs, "adAccountIDs mismatch")
+			assert.Equal(t, legacyResult.sc, queryResult.sc, "statsConfig mismatch")
+		})
+	}
+}

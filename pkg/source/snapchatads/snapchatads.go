@@ -14,6 +14,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -108,6 +109,153 @@ var pivots = map[string]bool{
 	"gender": true, "age_bucket": true,
 	"interest_category_id": true, "interest_category_name": true,
 	"operating_system": true, "make": true, "model": true,
+}
+
+// snapchatadsParamKeys are the query parameters recognized by the URL-style
+// source-table form (see parseSnapchatAdsTableSpec).
+var snapchatadsParamKeys = []string{
+	"account_ids", "granularity", "breakdown", "dimension", "pivot", "metrics",
+}
+
+// parsedSnapchatTable holds the result of parsing a snapchatads source-table string
+// in either the URL-style or the legacy colon form.
+type parsedSnapchatTable struct {
+	resourceName string
+	adAccountIDs []string
+	sc           *statsConfig
+}
+
+// parseSnapchatAdsTableSpec parses a source-table string in either form:
+//
+//	campaigns_stats?granularity=DAY&metrics=impressions,spend          (URL-style, stats)
+//	campaigns_stats?granularity=DAY&breakdown=ad&metrics=impressions   (URL-style, stats with options)
+//	campaigns:acc1,acc2                                                 (legacy, non-stats)
+//	campaigns_stats:DAY,adsquad:impressions,spend                       (legacy, stats)
+//
+// When the string has no query component the existing legacy logic runs unchanged.
+func parseSnapchatAdsTableSpec(name string) (parsedSnapchatTable, error) {
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return parsedSnapchatTable{}, err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, snapchatadsParamKeys...); err != nil {
+			return parsedSnapchatTable{}, err
+		}
+		resourceName := strings.TrimSpace(path)
+		rc, ok := resourceRegistry[resourceName]
+		if !ok {
+			return parsedSnapchatTable{}, fmt.Errorf("unsupported snapchat ads resource: %s", resourceName)
+		}
+
+		result := parsedSnapchatTable{resourceName: resourceName}
+
+		if rc.Level == statsLevel {
+			gran := strings.ToUpper(strings.TrimSpace(params.Get("granularity")))
+			if gran == "" {
+				return parsedSnapchatTable{}, fmt.Errorf(
+					"granularity is required for stats table '%s'", resourceName,
+				)
+			}
+			if !granularities[gran] {
+				return parsedSnapchatTable{}, fmt.Errorf(
+					"unrecognized granularity '%s'; must be one of: %s",
+					gran, joinMapKeys(granularities),
+				)
+			}
+
+			brkdwn := strings.ToLower(strings.TrimSpace(params.Get("breakdown")))
+			if brkdwn != "" && !breakdowns[brkdwn] {
+				return parsedSnapchatTable{}, fmt.Errorf(
+					"unrecognized breakdown '%s'; must be one of: %s",
+					brkdwn, joinMapKeys(breakdowns),
+				)
+			}
+
+			dim := strings.ToUpper(strings.TrimSpace(params.Get("dimension")))
+			if dim != "" && !dimensions[dim] {
+				return parsedSnapchatTable{}, fmt.Errorf(
+					"unrecognized dimension '%s'; must be one of: %s",
+					dim, joinMapKeys(dimensions),
+				)
+			}
+
+			pvt := strings.ToLower(strings.TrimSpace(params.Get("pivot")))
+			if pvt != "" && !pivots[pvt] {
+				return parsedSnapchatTable{}, fmt.Errorf(
+					"unrecognized pivot '%s'; must be one of: %s",
+					pvt, joinMapKeys(pivots),
+				)
+			}
+
+			fields := defaultStatsFields
+			if v := strings.TrimSpace(params.Get("metrics")); v != "" {
+				fields = v
+			}
+
+			result.sc = &statsConfig{
+				granularity: gran,
+				fields:      fields,
+				breakdown:   brkdwn,
+				dimension:   dim,
+				pivot:       pvt,
+			}
+		} else {
+			for _, v := range params["account_ids"] {
+				for _, id := range strings.Split(v, ",") {
+					if t := strings.TrimSpace(id); t != "" {
+						result.adAccountIDs = append(result.adAccountIDs, t)
+					}
+				}
+			}
+		}
+
+		return result, nil
+	}
+
+	// Legacy colon form — preserved exactly.
+	parts := strings.SplitN(name, ":", 2)
+	resourceName := parts[0]
+	param := ""
+	if len(parts) == 2 {
+		param = parts[1]
+	}
+
+	rc, ok := resourceRegistry[resourceName]
+	if !ok {
+		return parsedSnapchatTable{}, fmt.Errorf("unsupported snapchat ads resource: %s", resourceName)
+	}
+
+	result := parsedSnapchatTable{resourceName: resourceName}
+
+	if rc.Level == statsLevel {
+		if param == "" {
+			return parsedSnapchatTable{}, fmt.Errorf(
+				"'%s' requires granularity and metrics, use format: %s:<granularity>,<metrics> (e.g. %s:DAY:impressions,spend)",
+				resourceName, resourceName, resourceName,
+			)
+		}
+		parsed, err := parseStatsTable(name)
+		if err != nil {
+			return parsedSnapchatTable{}, err
+		}
+		result.sc = &parsed.config
+	} else {
+		if param != "" {
+			for _, id := range strings.Split(param, ",") {
+				id = strings.TrimSpace(id)
+				if id != "" {
+					result.adAccountIDs = append(result.adAccountIDs, id)
+				}
+			}
+			if len(result.adAccountIDs) == 0 {
+				return parsedSnapchatTable{}, fmt.Errorf("ad_account_id must be provided in format '%s:ad_account_id'", resourceName)
+			}
+		}
+	}
+
+	return result, nil
 }
 
 func NewSnapchatAdsSource() *SnapchatAdsSource {
@@ -239,35 +387,18 @@ type statsConfig struct {
 }
 
 func (s *SnapchatAdsSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
-	parts := strings.SplitN(req.Name, ":", 2)
-	resourceName := parts[0]
-	param := ""
-	if len(parts) == 2 {
-		param = parts[1]
+	parsed, err := parseSnapchatAdsTableSpec(req.Name)
+	if err != nil {
+		return nil, err
 	}
 
-	rc, ok := resourceRegistry[resourceName]
-	if !ok {
-		return nil, fmt.Errorf("unsupported snapchat ads resource: %s", resourceName)
-	}
+	resourceName := parsed.resourceName
+	adAccountIDs := parsed.adAccountIDs
+	sc := parsed.sc
 
-	var adAccountIDs []string
-	var sc *statsConfig
+	rc := resourceRegistry[resourceName]
 
 	if rc.Level == statsLevel {
-		if param == "" {
-			return nil, fmt.Errorf(
-				"'%s' requires granularity and metrics, use format: %s:<granularity>,<metrics> (e.g. %s:DAY:impressions,spend)",
-				resourceName, resourceName, resourceName,
-			)
-		}
-		parsed, err := parseStatsTable(req.Name)
-		if err != nil {
-			return nil, err
-		}
-		resourceName = parsed.resourceName
-		sc = &parsed.config
-
 		entity := statsEntityMap[resourceName]
 		pks := []string{entity.entityType + "_id"}
 		if sc.breakdown != "" {
@@ -280,18 +411,6 @@ func (s *SnapchatAdsSource) GetTable(ctx context.Context, req source.TableReques
 			return nil, fmt.Errorf("organization_id is required for '%s'", resourceName)
 		}
 	} else {
-		if param != "" {
-			for _, id := range strings.Split(param, ",") {
-				id = strings.TrimSpace(id)
-				if id != "" {
-					adAccountIDs = append(adAccountIDs, id)
-				}
-			}
-			if len(adAccountIDs) == 0 {
-				return nil, fmt.Errorf("ad_account_id must be provided in format '%s:ad_account_id'", resourceName)
-			}
-		}
-
 		if resourceName != "organizations" && s.orgID == "" {
 			return nil, fmt.Errorf("organization_id is required for table '%s'; only 'organizations' does not require organization_id", resourceName)
 		}

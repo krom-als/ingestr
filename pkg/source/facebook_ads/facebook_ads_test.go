@@ -74,19 +74,97 @@ func TestParseTableName(t *testing.T) {
 		raw            string
 		wantTable      string
 		wantAccountIDs []string
+		wantErr        bool
 	}{
-		{"campaigns", "campaigns", nil},
-		{"campaigns:1234567890", "campaigns", []string{"1234567890"}},
-		{"campaigns:1234567890,9876543210", "campaigns", []string{"1234567890", "9876543210"}},
-		{"ad_sets:act_9999", "ad_sets", []string{"act_9999"}},
-		{"facebook_insights", "facebook_insights", nil},
+		{"campaigns", "campaigns", nil, false},
+		{"campaigns:1234567890", "campaigns", []string{"1234567890"}, false},
+		{"campaigns:1234567890,9876543210", "campaigns", []string{"1234567890", "9876543210"}, false},
+		{"ad_sets:act_9999", "ad_sets", []string{"act_9999"}, false},
+		{"facebook_insights", "facebook_insights", nil, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.raw, func(t *testing.T) {
-			table, accountIDs := parseTableName(tt.raw)
+			table, accountIDs, err := parseTableName(tt.raw)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
 			assert.Equal(t, tt.wantTable, table)
 			assert.Equal(t, tt.wantAccountIDs, accountIDs)
+		})
+	}
+}
+
+func TestParseTableName_QueryForm(t *testing.T) {
+	tests := []struct {
+		raw            string
+		wantTable      string
+		wantAccountIDs []string
+		wantErr        bool
+	}{
+		{
+			raw:            "campaigns?account_ids=1234567890",
+			wantTable:      "campaigns",
+			wantAccountIDs: []string{"1234567890"},
+		},
+		{
+			raw:            "campaigns?account_ids=1234567890&account_ids=9876543210",
+			wantTable:      "campaigns",
+			wantAccountIDs: []string{"1234567890", "9876543210"},
+		},
+		{
+			raw:            "campaigns?account_ids=1234567890,9876543210",
+			wantTable:      "campaigns",
+			wantAccountIDs: []string{"1234567890", "9876543210"},
+		},
+		{
+			raw:            "ad_sets?account_ids=act_9999",
+			wantTable:      "ad_sets",
+			wantAccountIDs: []string{"act_9999"},
+		},
+		{
+			raw:     "campaigns?bad_key=x",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.raw, func(t *testing.T) {
+			table, accountIDs, err := parseTableName(tt.raw)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantTable, table)
+			assert.Equal(t, tt.wantAccountIDs, accountIDs)
+		})
+	}
+}
+
+// TestParseTableName_Equivalence asserts that legacy and query forms produce
+// identical output for representative inputs.
+func TestParseTableName_Equivalence(t *testing.T) {
+	pairs := []struct {
+		legacy string
+		query  string
+	}{
+		{"campaigns", "campaigns"},
+		{"campaigns:1234567890", "campaigns?account_ids=1234567890"},
+		{"campaigns:1234567890,9876543210", "campaigns?account_ids=1234567890&account_ids=9876543210"},
+		{"ad_sets:act_9999", "ad_sets?account_ids=act_9999"},
+	}
+
+	for _, p := range pairs {
+		t.Run(p.legacy, func(t *testing.T) {
+			lt, la, lerr := parseTableName(p.legacy)
+			qt, qa, qerr := parseTableName(p.query)
+			require.NoError(t, lerr)
+			require.NoError(t, qerr)
+			assert.Equal(t, lt, qt)
+			assert.Equal(t, la, qa)
 		})
 	}
 }
@@ -555,4 +633,209 @@ func TestEdgeConfig_AdSetsUsesUpdatedSince(t *testing.T) {
 	assert.Equal(t, "ad_sets", table.Name())
 	assert.Equal(t, config.StrategyMerge, table.Strategy())
 	assert.Equal(t, "updated_time", table.IncrementalKey())
+}
+
+func TestParseInsightsTableName_QueryForm(t *testing.T) {
+	tests := []struct {
+		name           string
+		raw            string
+		wantAccountIDs []string
+		wantBreakdown  string
+		wantDimensions []string
+		wantFields     []string
+		wantLevel      string
+		wantErr        bool
+	}{
+		{
+			name:           "bare facebook_insights no params",
+			raw:            "facebook_insights?account_ids=123",
+			wantAccountIDs: []string{"123"},
+		},
+		{
+			name:          "predefined breakdown",
+			raw:           "facebook_insights?breakdown=ads_insights_age_and_gender",
+			wantBreakdown: "ads_insights_age_and_gender",
+		},
+		{
+			name:          "predefined breakdown with fields",
+			raw:           "facebook_insights?breakdown=ads_insights_country&fields=impressions&fields=clicks&fields=spend",
+			wantBreakdown: "ads_insights_country",
+			wantFields:    []string{"impressions", "clicks", "spend"},
+		},
+		{
+			name:           "custom dimensions with fields",
+			raw:            "facebook_insights?dimensions=age&dimensions=gender&fields=impressions&fields=clicks&fields=spend",
+			wantDimensions: []string{"age", "gender"},
+			wantFields:     []string{"impressions", "clicks", "spend"},
+		},
+		{
+			name:           "level with dimensions and fields",
+			raw:            "facebook_insights?level=campaign&dimensions=age&dimensions=gender&fields=impressions&fields=clicks",
+			wantDimensions: []string{"age", "gender"},
+			wantFields:     []string{"impressions", "clicks"},
+			wantLevel:      "campaign",
+		},
+		{
+			name:           "multi-account via account_ids repeated",
+			raw:            "facebook_insights?account_ids=123&account_ids=456",
+			wantAccountIDs: []string{"123", "456"},
+		},
+		{
+			name:           "multi-account with predefined breakdown",
+			raw:            "facebook_insights?account_ids=123&account_ids=456&breakdown=ads_insights_age_and_gender",
+			wantAccountIDs: []string{"123", "456"},
+			wantBreakdown:  "ads_insights_age_and_gender",
+		},
+		{
+			name:           "multi-account with breakdown and fields",
+			raw:            "facebook_insights?account_ids=123&account_ids=456&breakdown=ads_insights_country&fields=impressions&fields=clicks&fields=spend",
+			wantAccountIDs: []string{"123", "456"},
+			wantBreakdown:  "ads_insights_country",
+			wantFields:     []string{"impressions", "clicks", "spend"},
+		},
+		{
+			name:           "facebook_insights_with_account_ids prefix query form",
+			raw:            "facebook_insights_with_account_ids?account_ids=123&account_ids=456",
+			wantAccountIDs: []string{"123", "456"},
+		},
+		{
+			name:    "facebook_insights_with_account_ids missing account_ids",
+			raw:     "facebook_insights_with_account_ids?breakdown=ads_insights_age_and_gender",
+			wantErr: true,
+		},
+		{
+			name:      "level only",
+			raw:       "facebook_insights?level=campaign",
+			wantLevel: "campaign",
+		},
+		{
+			name:       "level with fields",
+			raw:        "facebook_insights?level=campaign&fields=impressions&fields=clicks",
+			wantLevel:  "campaign",
+			wantFields: []string{"impressions", "clicks"},
+		},
+		{
+			name:    "unknown param rejected",
+			raw:     "facebook_insights?bad_key=x",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			accountIDs, ic, err := parseInsightsTableName(tt.raw)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantAccountIDs, accountIDs)
+			assert.Equal(t, tt.wantBreakdown, ic.breakdown)
+			assert.Equal(t, tt.wantDimensions, ic.dimensions)
+			assert.Equal(t, tt.wantFields, ic.fields)
+			assert.Equal(t, tt.wantLevel, ic.level)
+		})
+	}
+}
+
+// TestParseInsightsTableName_Equivalence asserts that legacy and query forms
+// produce identical insightsConfig and accountIDs for representative inputs.
+func TestParseInsightsTableName_Equivalence(t *testing.T) {
+	pairs := []struct {
+		name   string
+		legacy string
+		query  string
+	}{
+		{
+			name:   "bare insights",
+			legacy: "facebook_insights",
+			query:  "facebook_insights",
+		},
+		{
+			name:   "predefined breakdown",
+			legacy: "facebook_insights:ads_insights_age_and_gender",
+			query:  "facebook_insights?breakdown=ads_insights_age_and_gender",
+		},
+		{
+			name:   "breakdown with fields",
+			legacy: "facebook_insights:ads_insights_country:impressions,clicks,spend",
+			query:  "facebook_insights?breakdown=ads_insights_country&fields=impressions&fields=clicks&fields=spend",
+		},
+		{
+			name:   "custom dimensions with fields",
+			legacy: "facebook_insights:age,gender:impressions,clicks,spend",
+			query:  "facebook_insights?dimensions=age&dimensions=gender&fields=impressions&fields=clicks&fields=spend",
+		},
+		{
+			name:   "multi-account basic",
+			legacy: "facebook_insights_with_account_ids:123,456",
+			query:  "facebook_insights?account_ids=123&account_ids=456",
+		},
+		{
+			name:   "multi-account with breakdown",
+			legacy: "facebook_insights_with_account_ids:123,456:ads_insights_age_and_gender",
+			query:  "facebook_insights?account_ids=123&account_ids=456&breakdown=ads_insights_age_and_gender",
+		},
+		{
+			name:   "multi-account with breakdown and fields",
+			legacy: "facebook_insights_with_account_ids:123,456:ads_insights_country:impressions,clicks,spend",
+			query:  "facebook_insights?account_ids=123&account_ids=456&breakdown=ads_insights_country&fields=impressions&fields=clicks&fields=spend",
+		},
+		{
+			name:   "level only",
+			legacy: "facebook_insights:campaign",
+			query:  "facebook_insights?level=campaign",
+		},
+		{
+			name:   "level with fields",
+			legacy: "facebook_insights:campaign:impressions,clicks",
+			query:  "facebook_insights?level=campaign&fields=impressions&fields=clicks",
+		},
+	}
+
+	for _, p := range pairs {
+		t.Run(p.name, func(t *testing.T) {
+			la, lic, lerr := parseInsightsTableName(p.legacy)
+			qa, qic, qerr := parseInsightsTableName(p.query)
+			require.NoError(t, lerr)
+			require.NoError(t, qerr)
+			assert.Equal(t, la, qa, "accountIDs mismatch")
+			assert.Equal(t, lic.breakdown, qic.breakdown, "breakdown mismatch")
+			assert.Equal(t, lic.dimensions, qic.dimensions, "dimensions mismatch")
+			assert.Equal(t, lic.fields, qic.fields, "fields mismatch")
+			assert.Equal(t, lic.level, qic.level, "level mismatch")
+		})
+	}
+}
+
+func TestGetTable_QueryForm_Standard(t *testing.T) {
+	s := &FacebookAdsSource{accountID: ""}
+
+	table, err := s.GetTable(context.Background(), source.TableRequest{Name: "campaigns?account_ids=1234567890"})
+	require.NoError(t, err)
+	assert.Equal(t, "campaigns", table.Name())
+	assert.Equal(t, config.StrategyMerge, table.Strategy())
+}
+
+func TestGetTable_QueryForm_Insights(t *testing.T) {
+	s := &FacebookAdsSource{accountID: "act_111"}
+
+	table, err := s.GetTable(context.Background(), source.TableRequest{
+		Name: "facebook_insights?breakdown=ads_insights_age_and_gender",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "facebook_insights", table.Name())
+	assert.Equal(t, config.StrategyMerge, table.Strategy())
+	assert.Equal(t, []string{"campaign_id", "adset_id", "ad_id", "date_start", "age", "gender"}, table.PrimaryKeys())
+}
+
+func TestGetTable_QueryForm_InsightsWithAccountIDs(t *testing.T) {
+	s := &FacebookAdsSource{accountID: ""}
+
+	table, err := s.GetTable(context.Background(), source.TableRequest{
+		Name: "facebook_insights?account_ids=123&account_ids=456",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "facebook_insights", table.Name())
+	assert.Equal(t, "date_start", table.IncrementalKey())
 }

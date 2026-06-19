@@ -18,6 +18,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 	"resty.dev/v3"
 )
 
@@ -486,17 +487,65 @@ func parseTableAssocOverride(name string) (string, []string, bool) {
 	return base, out, true
 }
 
-func supportedTableNames() string {
-	names := make([]string, 0, len(tables))
-	for name := range tables {
-		names = append(names, name)
-	}
-	return strings.Join(names, ", ")
+// hubspotParamKeys are the query parameters recognized by the URL-style
+// source-table form (see parseHubspotTableSpec).
+var hubspotParamKeys = []string{"associations", "properties", "object"}
+
+// hubspotTableSpec is the normalized, form-independent result of parsing a
+// HubSpot source-table string.
+type hubspotTableSpec struct {
+	// base is the canonical table key used internally (e.g. "contacts",
+	// "property_history:contacts", "custom:", "property_history:custom:").
+	// For custom-object forms it includes the resolved object suffix so existing
+	// read helpers (readCustomObject, readCustomObjectHistory) continue to work
+	// with the same string they always received from GetTable.
+	base          string
+	historyProps  []string
+	assocOverride []string
 }
 
-func (s *Hubspotsource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
-	tableName := req.Name
-	base, historyProps := parseHistoryTableName(tableName)
+// splitHubspotList splits a comma-separated value list, trimming whitespace and
+// dropping empty segments.
+func splitHubspotList(s string) []string {
+	raw := strings.Split(s, ",")
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// parseHubspotTableSpec parses a source-table string in either the URL-style
+// query form (preferred) or the legacy colon-delimited form. Legacy inputs are
+// passed through to the original parsers unchanged, preserving byte-for-byte
+// compatibility.
+//
+// Query form examples:
+//
+//	contacts?associations=companies&associations=deals
+//	property_history:contacts?properties=email&properties=firstname
+//	custom?object=myObj
+//	custom?object=myObj&associations=assoc1&associations=assoc2
+//	property_history:custom?object=myObj
+//	property_history:custom?object=myObj&properties=p1&properties=p2
+func parseHubspotTableSpec(name string) (hubspotTableSpec, error) {
+	path, params, hasQuery, err := tablespec.Split(name)
+	if err != nil {
+		return hubspotTableSpec{}, err
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, hubspotParamKeys...); err != nil {
+			return hubspotTableSpec{}, err
+		}
+		return applyHubspotParams(path, params)
+	}
+
+	// Legacy colon form — run the original parsers unchanged.
+	base, historyProps := parseHistoryTableName(name)
 
 	isCustom := strings.HasPrefix(base, "custom:")
 	isCustomHistory := strings.HasPrefix(base, historyPrefix+"custom:")
@@ -509,6 +558,100 @@ func (s *Hubspotsource) GetTable(ctx context.Context, req source.TableRequest) (
 			assocOverride = override
 		}
 	}
+
+	return hubspotTableSpec{
+		base:          base,
+		historyProps:  historyProps,
+		assocOverride: assocOverride,
+	}, nil
+}
+
+// applyHubspotParams builds a hubspotTableSpec from URL-style query parameters.
+// path is already stripped of the "?" suffix by tablespec.Split.
+func applyHubspotParams(path string, params url.Values) (hubspotTableSpec, error) {
+	path = strings.TrimSpace(path)
+
+	var associations []string
+	for _, v := range params["associations"] {
+		associations = append(associations, splitHubspotList(v)...)
+	}
+
+	var properties []string
+	for _, v := range params["properties"] {
+		properties = append(properties, splitHubspotList(v)...)
+	}
+
+	objectName := strings.TrimSpace(params.Get("object"))
+
+	switch path {
+	case "custom":
+		if objectName == "" {
+			return hubspotTableSpec{}, fmt.Errorf("hubspot custom object query form requires the 'object' parameter")
+		}
+		// Reconstruct the colon form that readCustomObject expects.
+		base := "custom:" + objectName
+		if len(associations) > 0 {
+			base += ":" + strings.Join(associations, ",")
+		}
+		return hubspotTableSpec{base: base}, nil
+
+	case historyPrefix + "custom":
+		if objectName == "" {
+			return hubspotTableSpec{}, fmt.Errorf("hubspot property_history:custom query form requires the 'object' parameter")
+		}
+		base := historyPrefix + "custom:" + objectName
+		return hubspotTableSpec{
+			base:         base,
+			historyProps: nilIfEmpty(properties),
+		}, nil
+
+	default:
+		// Standard table (plain or property_history:).
+		if objectName != "" {
+			return hubspotTableSpec{}, fmt.Errorf("'object' parameter is only valid for 'custom' and 'property_history:custom' paths")
+		}
+		spec := hubspotTableSpec{base: path}
+		if strings.HasPrefix(path, historyPrefix) {
+			spec.historyProps = nilIfEmpty(properties)
+		} else {
+			if len(associations) > 0 {
+				spec.assocOverride = associations
+			}
+		}
+		return spec, nil
+	}
+}
+
+// nilIfEmpty returns nil when s is empty, otherwise s. This keeps the internal
+// convention that a nil properties slice means "fetch all" while a non-nil empty
+// slice would mean "fetch none" — a distinction the callers rely on.
+func nilIfEmpty(s []string) []string {
+	if len(s) == 0 {
+		return nil
+	}
+	return s
+}
+
+func supportedTableNames() string {
+	names := make([]string, 0, len(tables))
+	for name := range tables {
+		names = append(names, name)
+	}
+	return strings.Join(names, ", ")
+}
+
+func (s *Hubspotsource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
+	tableName := req.Name
+	spec, err := parseHubspotTableSpec(tableName)
+	if err != nil {
+		return nil, err
+	}
+	base := spec.base
+	historyProps := spec.historyProps
+	assocOverride := spec.assocOverride
+
+	isCustom := strings.HasPrefix(base, "custom:")
+	isCustomHistory := strings.HasPrefix(base, historyPrefix+"custom:")
 
 	cfg, ok := tables[base]
 	if !ok && !isCustom && !isCustomHistory {

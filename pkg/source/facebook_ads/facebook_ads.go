@@ -15,6 +15,7 @@ import (
 	httpclient "github.com/bruin-data/ingestr/pkg/http"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 )
 
 const (
@@ -152,7 +153,11 @@ func (s *FacebookAdsSource) GetTable(ctx context.Context, req source.TableReques
 		}
 		ic = &parsedIC
 	} else {
-		tableName, tableAccountIDs = parseTableName(req.Name)
+		var err error
+		tableName, tableAccountIDs, err = parseTableName(req.Name)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if !isValidTable(tableName) {
@@ -197,9 +202,53 @@ func (s *FacebookAdsSource) GetTable(ctx context.Context, req source.TableReques
 	}, nil
 }
 
-// parseTableName splits "campaigns:1234567890,9876543210" into ("campaigns", ["1234567890", "9876543210"]).
-// If no colon is present, the account IDs slice is empty.
-func parseTableName(raw string) (table string, accountIDs []string) {
+// facebookAdsParamKeys lists all URL-style query parameters accepted by the
+// facebook_ads table-string parser.
+//
+//	account_ids  – repeated key; each value may be comma-joined (list)
+//	breakdown    – predefined breakdown name, e.g. "ads_insights_age_and_gender"
+//	dimensions   – repeated key; custom breakdown dimensions (list)
+//	fields       – repeated key; custom insight fields to request (list)
+//	level        – aggregation level: account | campaign | adset | ad
+var facebookAdsParamKeys = []string{"account_ids", "breakdown", "dimensions", "fields", "level"}
+
+// splitIDs splits a comma-separated ID segment into trimmed, non-empty IDs.
+func splitIDs(v string) []string {
+	var ids []string
+	for _, id := range strings.Split(v, ",") {
+		if t := strings.TrimSpace(id); t != "" {
+			ids = append(ids, t)
+		}
+	}
+	return ids
+}
+
+// parseTableName parses the standard (non-insights) table string.
+//
+// URL-style query form (preferred):
+//
+//	campaigns?account_ids=1234567890&account_ids=9876543210
+//
+// Legacy colon form (preserved byte-for-byte):
+//
+//	campaigns:1234567890,9876543210
+func parseTableName(raw string) (table string, accountIDs []string, err error) {
+	path, params, hasQuery, splitErr := tablespec.Split(raw)
+	if splitErr != nil {
+		return "", nil, splitErr
+	}
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, facebookAdsParamKeys...); err != nil {
+			return "", nil, err
+		}
+		table = strings.TrimSpace(path)
+		for _, v := range params["account_ids"] {
+			accountIDs = append(accountIDs, splitIDs(v)...)
+		}
+		return table, accountIDs, nil
+	}
+
+	// Legacy colon form, preserved exactly.
 	parts := strings.SplitN(raw, ":", 2)
 	table = parts[0]
 	if len(parts) == 2 && parts[1] != "" {
@@ -210,11 +259,18 @@ func parseTableName(raw string) (table string, accountIDs []string) {
 			}
 		}
 	}
-	return table, accountIDs
+	return table, accountIDs, nil
 }
 
-// parseInsightsTableName parses the complex insights table name format.
-// Supported formats:
+// parseInsightsTableName parses the insights table string.
+//
+// URL-style query form (preferred):
+//
+//	facebook_insights?account_ids=123&account_ids=456&breakdown=ads_insights_country&fields=impressions&fields=clicks
+//	facebook_insights?dimensions=age&dimensions=gender&fields=impressions&level=campaign
+//	facebook_insights_with_account_ids?account_ids=123&breakdown=ads_insights_age_and_gender
+//
+// Legacy colon form (preserved byte-for-byte):
 //   - facebook_insights
 //   - facebook_insights:ads_insights_age_and_gender
 //   - facebook_insights:ads_insights_country:impressions,clicks,spend
@@ -224,6 +280,50 @@ func parseTableName(raw string) (table string, accountIDs []string) {
 //   - facebook_insights_with_account_ids:123,456:ads_insights_age_and_gender
 //   - facebook_insights_with_account_ids:123,456:ads_insights:impressions,clicks
 func parseInsightsTableName(raw string) (accountIDs []string, ic insightsConfig, err error) {
+	path, params, hasQuery, splitErr := tablespec.Split(raw)
+	if splitErr != nil {
+		return nil, ic, splitErr
+	}
+
+	if hasQuery {
+		if err := tablespec.ValidateKeys(params, facebookAdsParamKeys...); err != nil {
+			return nil, ic, err
+		}
+
+		prefix := strings.TrimSpace(path)
+
+		if prefix == "facebook_insights_with_account_ids" {
+			if !params.Has("account_ids") {
+				return nil, ic, fmt.Errorf("account IDs required for facebook_insights_with_account_ids")
+			}
+		}
+
+		for _, v := range params["account_ids"] {
+			accountIDs = append(accountIDs, splitIDs(v)...)
+		}
+
+		ic.breakdown = strings.TrimSpace(params.Get("breakdown"))
+		ic.level = strings.TrimSpace(params.Get("level"))
+
+		for _, v := range params["dimensions"] {
+			for _, d := range strings.Split(v, ",") {
+				if d = strings.TrimSpace(d); d != "" {
+					ic.dimensions = append(ic.dimensions, d)
+				}
+			}
+		}
+		for _, v := range params["fields"] {
+			for _, f := range strings.Split(v, ",") {
+				if f = strings.TrimSpace(f); f != "" {
+					ic.fields = append(ic.fields, f)
+				}
+			}
+		}
+
+		return accountIDs, ic, nil
+	}
+
+	// Legacy colon form, preserved exactly.
 	parts := strings.Split(raw, ":")
 	prefix := parts[0]
 	parts = parts[1:]

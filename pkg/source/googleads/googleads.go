@@ -17,6 +17,7 @@ import (
 	"github.com/bruin-data/ingestr/pkg/arrowconv"
 	"github.com/bruin-data/ingestr/pkg/schema"
 	"github.com/bruin-data/ingestr/pkg/source"
+	"github.com/bruin-data/ingestr/pkg/tablespec"
 	"github.com/shenzhencenter/google-ads-pb/services"
 	"golang.org/x/oauth2"
 	"google.golang.org/grpc"
@@ -167,13 +168,116 @@ func (s *GoogleAdsSource) HandlesIncrementality() bool {
 	return false
 }
 
+// googleadsDailyParamKeys are the recognized URL-style query parameters for the
+// "daily?..." form.
+var googleadsDailyParamKeys = []string{"resource", "dimensions", "metrics", "customer_ids"}
+
+// googleadsBuiltinParamKeys are the recognized URL-style query parameters for
+// builtin report names (e.g. "campaign_report_daily?customer_ids=...").
+var googleadsBuiltinParamKeys = []string{"customer_ids"}
+
+// reportFromQueryParams builds a Report and optional customer-ID list from
+// URL-style query params (the "daily?resource=...&dimensions=...&metrics=..."
+// form). dimensions and metrics accept repeated keys and/or comma-joined values.
+func reportFromQueryParams(params url.Values) (*Report, []string, error) {
+	resource := strings.TrimSpace(params.Get("resource"))
+	if resource == "" {
+		return nil, nil, fmt.Errorf("resource is required")
+	}
+
+	report := &Report{
+		Resource: resource,
+		Segments: []string{"segments.date"},
+	}
+
+	var dimVals []string
+	for _, v := range params["dimensions"] {
+		for _, d := range strings.Split(v, ",") {
+			if t := strings.TrimSpace(d); t != "" {
+				dimVals = append(dimVals, t)
+			}
+		}
+	}
+	if len(dimVals) == 0 {
+		return nil, nil, fmt.Errorf("dimensions are required")
+	}
+	for _, d := range dimVals {
+		if !strings.Contains(d, ".") {
+			return nil, nil, fmt.Errorf("invalid dimension format %q, expected {resource}.{field}", d)
+		}
+		if strings.HasPrefix(d, "segments.") {
+			return nil, nil, fmt.Errorf("segments are not allowed in dimensions: %q", d)
+		}
+		report.Dimensions = append(report.Dimensions, d)
+	}
+
+	var metVals []string
+	for _, v := range params["metrics"] {
+		for _, m := range strings.Split(v, ",") {
+			if t := strings.TrimSpace(m); t != "" {
+				metVals = append(metVals, t)
+			}
+		}
+	}
+	if len(metVals) == 0 {
+		return nil, nil, fmt.Errorf("metrics are required")
+	}
+	for _, m := range metVals {
+		if !strings.HasPrefix(m, "metrics.") {
+			m = "metrics." + m
+		}
+		report.Metrics = append(report.Metrics, m)
+	}
+
+	var customerIDs []string
+	for _, v := range params["customer_ids"] {
+		for _, cid := range strings.Split(v, ",") {
+			if t := strings.TrimSpace(cid); t != "" {
+				customerIDs = append(customerIDs, t)
+			}
+		}
+	}
+
+	return report, customerIDs, nil
+}
+
+// splitCustomerIDsParam extracts customer_ids from URL-style query params.
+func splitCustomerIDsParam(params url.Values) []string {
+	var ids []string
+	for _, v := range params["customer_ids"] {
+		for _, cid := range strings.Split(v, ",") {
+			if t := strings.TrimSpace(cid); t != "" {
+				ids = append(ids, t)
+			}
+		}
+	}
+	return ids
+}
+
 func (s *GoogleAdsSource) GetTable(ctx context.Context, req source.TableRequest) (source.SourceTable, error) {
 	tableName := req.Name
 	primaryKeys := []string{}
 	incrementalKey := ""
 
+	path, params, hasQuery, err := tablespec.Split(tableName)
+	if err != nil {
+		return nil, err
+	}
+
 	switch {
 	case strings.HasPrefix(tableName, "gaql_query:"):
+		// gaql_query: carries raw GAQL — no query form, keep legacy-only.
+
+	case hasQuery && path == "daily":
+		if err := tablespec.ValidateKeys(params, googleadsDailyParamKeys...); err != nil {
+			return nil, err
+		}
+		report, _, err := reportFromQueryParams(params)
+		if err != nil {
+			return nil, fmt.Errorf("invalid daily report params: %w", err)
+		}
+		primaryKeys = appendUnique(report.PrimaryKeys(), "customer_id")
+		incrementalKey = "segments_date"
 
 	case strings.HasPrefix(tableName, "daily:"):
 		spec := strings.TrimPrefix(tableName, "daily:")
@@ -183,6 +287,15 @@ func (s *GoogleAdsSource) GetTable(ctx context.Context, req source.TableRequest)
 		}
 		primaryKeys = appendUnique(report.PrimaryKeys(), "customer_id")
 		incrementalKey = "segments_date"
+
+	case hasQuery:
+		if err := tablespec.ValidateKeys(params, googleadsBuiltinParamKeys...); err != nil {
+			return nil, err
+		}
+		if report, ok := builtinReports[path]; ok {
+			primaryKeys = appendUnique(report.PrimaryKeys(), "customer_id")
+			incrementalKey = "segments_date"
+		}
 
 	default:
 		name := tableName
@@ -222,6 +335,11 @@ func (s *GoogleAdsSource) read(ctx context.Context, table string, opts source.Re
 	var specCustomerIDs []string
 	var err error
 
+	path, params, hasQuery, err := tablespec.Split(table)
+	if err != nil {
+		return nil, err
+	}
+
 	switch {
 	case strings.HasPrefix(table, "gaql_query:"):
 		query = strings.TrimPrefix(table, "gaql_query:")
@@ -230,6 +348,16 @@ func (s *GoogleAdsSource) read(ctx context.Context, table string, opts source.Re
 		}
 		query = strings.ReplaceAll(query, ":interval_start", "'"+start+"'")
 		query = strings.ReplaceAll(query, ":interval_end", "'"+end+"'")
+
+	case hasQuery && path == "daily":
+		report, specCustomerIDs, err = reportFromQueryParams(params)
+		if err != nil {
+			return nil, fmt.Errorf("invalid daily report params: %w", err)
+		}
+		if len(specCustomerIDs) > 0 {
+			customerIDs = specCustomerIDs
+		}
+		query = report.BuildQuery(start, end)
 
 	case strings.HasPrefix(table, "daily:"):
 		spec := strings.TrimPrefix(table, "daily:")
@@ -241,6 +369,16 @@ func (s *GoogleAdsSource) read(ctx context.Context, table string, opts source.Re
 			customerIDs = specCustomerIDs
 		}
 		query = report.BuildQuery(start, end)
+
+	case hasQuery:
+		specCustomerIDs = splitCustomerIDsParam(params)
+		if len(specCustomerIDs) > 0 {
+			customerIDs = specCustomerIDs
+		}
+		if r, ok := builtinReports[path]; ok {
+			report = r
+			query = r.BuildQuery(start, end)
+		}
 
 	case strings.Contains(table, ":"):
 		parts := strings.SplitN(table, ":", 2)
